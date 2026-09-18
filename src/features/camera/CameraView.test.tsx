@@ -24,6 +24,18 @@ beforeEach(() => {
   vi.stubGlobal('isSecureContext', true)
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    clearRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D)
+  vi.stubGlobal(
+    'Image',
+    class {
+      src = ''
+      naturalWidth = 800
+      naturalHeight = 800
+      decode = vi.fn().mockResolvedValue(undefined)
+    },
+  )
 })
 
 afterEach(() => {
@@ -120,7 +132,7 @@ describe('CameraView', () => {
     expect(track.stop).toHaveBeenCalledOnce()
   })
 
-  it('starts pose only with a playing camera and disposes it on toggle and stop', async () => {
+  it('shares a session across overlay toggles and stops only when both are off or camera stops', async () => {
     getUserMedia.mockResolvedValue(fakeStream().stream)
     render(<CameraView />)
     expect(startPoseSession).not.toHaveBeenCalled()
@@ -128,16 +140,16 @@ describe('CameraView', () => {
     await screen.findByRole('button', { name: 'カメラを停止' })
     expect(startPoseSession).toHaveBeenCalledOnce()
     const dispose = vi.mocked(startPoseSession).mock.results[0].value
-    fireEvent.click(
-      screen.getByRole('checkbox', { name: '姿勢推定・骨格表示' }),
-    )
-    expect(dispose).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('checkbox', { name: '骨格を表示' }))
+    expect(dispose).not.toHaveBeenCalled()
     expect(
       screen.queryByLabelText('肩・肘・手首・腰の骨格表示'),
     ).not.toBeInTheDocument()
-    fireEvent.click(
-      screen.getByRole('checkbox', { name: '姿勢推定・骨格表示' }),
-    )
+    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
+    expect(startPoseSession).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tシャツを表示' }))
+    expect(dispose).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tシャツを表示' }))
     expect(startPoseSession).toHaveBeenCalledTimes(2)
     const secondDispose = vi.mocked(startPoseSession).mock.results[1].value
     fireEvent.click(screen.getByRole('button', { name: 'カメラを停止' }))

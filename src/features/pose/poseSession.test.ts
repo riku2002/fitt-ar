@@ -1,19 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startPoseSession } from './poseSession'
 import type { PoseDetector } from './poseSession'
+import { createPoseChannel } from './poseChannel'
 
 let callback: FrameRequestCallback | undefined
-const context = {
-  clearRect: vi.fn(),
-  beginPath: vi.fn(),
-  moveTo: vi.fn(),
-  lineTo: vi.fn(),
-  stroke: vi.fn(),
-  arc: vi.fn(),
-  fill: vi.fn(),
-}
 const flush = () => new Promise<void>((resolve) => queueMicrotask(resolve))
-
 beforeEach(() => {
   callback = undefined
   vi.stubGlobal(
@@ -24,15 +15,11 @@ beforeEach(() => {
     }),
   )
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
-    context as unknown as CanvasRenderingContext2D,
-  )
 })
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
-
 function fixture() {
   const video = {
     readyState: 2,
@@ -40,53 +27,67 @@ function fixture() {
     videoHeight: 720,
     currentTime: 0,
   } as HTMLVideoElement
-  const canvas = document.createElement('canvas')
   const detector = {
     detectForVideo: vi.fn(() => ({ landmarks: [] })),
     close: vi.fn(),
   }
-  const report = vi.fn()
-  return { video, canvas, detector, report }
+  const callbacks = { onFrame: vi.fn(), onState: vi.fn() }
+  return { video, detector, callbacks }
 }
 
-describe('pose session lifecycle', () => {
-  it('releases a model that finishes loading after stop without starting inference', async () => {
-    const { video, canvas, detector, report } = fixture()
+describe('shared pose session lifecycle', () => {
+  it('closes a model loaded after stop without starting inference', async () => {
+    const { video, detector, callbacks } = fixture()
     let resolve!: (value: PoseDetector) => void
-    const load = vi.fn(
+    const stop = startPoseSession(
+      video,
+      callbacks,
       () =>
         new Promise<PoseDetector>((done) => {
           resolve = done
         }),
     )
-    const stop = startPoseSession(video, canvas, report, load)
     await flush()
     stop()
     resolve(detector)
     await flush()
     expect(detector.close).toHaveBeenCalledOnce()
     expect(requestAnimationFrame).not.toHaveBeenCalled()
-    expect(report).not.toHaveBeenCalled()
+    expect(callbacks.onState).not.toHaveBeenCalled()
+    expect(callbacks.onFrame).toHaveBeenCalledExactlyOnceWith(null)
   })
   it('does not load a discarded StrictMode session', async () => {
-    const { video, canvas, detector, report } = fixture()
+    const { video, detector, callbacks } = fixture()
     const load = vi.fn(async () => detector)
-    startPoseSession(video, canvas, report, load)()
+    startPoseSession(video, callbacks, load)()
     await flush()
     expect(load).not.toHaveBeenCalled()
   })
-  it('throttles inference, skips duplicate frames, and cancels on stop', async () => {
-    const { video, canvas, detector, report } = fixture()
-    const stop = startPoseSession(video, canvas, report, async () => detector)
+  it('shares one inference with multiple consumers and stops publishing after disposal', async () => {
+    const { video, detector, callbacks } = fixture()
+    const channel = createPoseChannel()
+    const skeleton = vi.fn(),
+      garment = vi.fn()
+    channel.subscribe(skeleton)
+    channel.subscribe(garment)
+    const stop = startPoseSession(
+      video,
+      { ...callbacks, onFrame: channel.publish },
+      async () => detector,
+    )
     await flush()
     callback?.(100)
     expect(detector.detectForVideo).toHaveBeenCalledExactlyOnceWith(video, 100)
-    expect(canvas.width).toBe(1280)
-    expect(canvas.height).toBe(720)
-    callback?.(200) // Same decoded video frame.
-    expect(detector.detectForVideo).toHaveBeenCalledOnce()
+    expect(skeleton.mock.lastCall?.[0]).toBe(garment.mock.lastCall?.[0])
+    expect(skeleton).toHaveBeenLastCalledWith({
+      landmarks: [],
+      width: 1280,
+      height: 720,
+      timestamp: 100,
+    })
+    callback?.(120) // Same decoded frame.
     video.currentTime = 0.1
-    callback?.(150) // New frame, but still inside the rate limit.
+    callback?.(150) // Below 15 FPS interval.
     expect(detector.detectForVideo).toHaveBeenCalledOnce()
     callback?.(210)
     expect(detector.detectForVideo).toHaveBeenCalledTimes(2)
@@ -95,27 +96,41 @@ describe('pose session lifecycle', () => {
     stop()
     expect(detector.close).toHaveBeenCalledOnce()
     expect(detector.detectForVideo).toHaveBeenCalledTimes(2)
+    expect(garment).toHaveBeenLastCalledWith(null)
     expect(cancelAnimationFrame).toHaveBeenCalled()
   })
+  it('clears a stalled video and resumes with fresh frames', async () => {
+    const { video, detector, callbacks } = fixture()
+    const stop = startPoseSession(video, callbacks, async () => detector)
+    await flush()
+    callback?.(100)
+    callback?.(601)
+    expect(callbacks.onFrame).toHaveBeenLastCalledWith(null)
+    video.currentTime = 1
+    callback?.(700)
+    expect(callbacks.onFrame.mock.lastCall?.[0]?.timestamp).toBe(700)
+    stop()
+  })
   it('reports loading failure without starting a loop', async () => {
-    const { video, canvas, report } = fixture()
-    startPoseSession(video, canvas, report, async () => {
+    const { video, callbacks } = fixture()
+    startPoseSession(video, callbacks, async () => {
       throw new Error('missing model')
     })
     await flush()
-    expect(report).toHaveBeenCalledWith('error')
+    expect(callbacks.onState).toHaveBeenCalledWith('error')
+    expect(callbacks.onFrame).toHaveBeenLastCalledWith(null)
     expect(requestAnimationFrame).not.toHaveBeenCalled()
   })
-  it('closes and clears if inference fails', async () => {
-    const { video, canvas, detector, report } = fixture()
+  it('closes and clears all consumers if inference fails', async () => {
+    const { video, detector, callbacks } = fixture()
     detector.detectForVideo.mockImplementation(() => {
       throw new Error('runtime error')
     })
-    startPoseSession(video, canvas, report, async () => detector)
+    startPoseSession(video, callbacks, async () => detector)
     await flush()
     callback?.(100)
-    expect(report).toHaveBeenLastCalledWith('error')
+    expect(callbacks.onState).toHaveBeenLastCalledWith('error')
     expect(detector.close).toHaveBeenCalledOnce()
-    expect(context.clearRect).toHaveBeenCalledWith(0, 0, 1280, 720)
+    expect(callbacks.onFrame).toHaveBeenLastCalledWith(null)
   })
 })
