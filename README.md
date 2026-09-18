@@ -1,4 +1,5 @@
 # Realtime AR Try-On — Pose Tracking
+https://fitt-ar.vercel.app
 
 リアルタイムAR試着Webアプリの姿勢推定版です。カメラ映像に肩・肘・手首・腰の骨格を重ねて表示します。
 
@@ -154,8 +155,3 @@ git push -u origin feature/your-feature
 
 GitHub ActionsがPRとmainへのpushで同じチェックを実行します。
 レビュー・CI確認後にPRをマージし、チームメンバーへリポジトリURLを共有してください。
-
-## ブラウザだけで共有したい場合（任意）
-
-GitHubへのコード配布とWeb公開は別です。実行済みサイトのURLも配る場合は、VercelでこのリポジトリをImportし、FrameworkをVite、Node.jsを24.x、Build Commandを `npm run build`、Output Directoryを `dist` に設定します。環境変数は不要です。
-発行されたHTTPS URLならカメラを利用できます（各端末で許可が必要）。このリポジトリの初期構築だけではVercelへの公開は行いません。
