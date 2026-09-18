@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>服の位置合わせ | fitt-ar</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f4f5f0;
+        color: #222b27;
+        font:
+          15px/1.8 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1120px;
+        margin: auto;
+        padding: 32px 24px 64px;
+      }
+      h1 {
+        font-size: clamp(28px, 4vw, 40px);
+        margin: 12px 0;
+        letter-spacing: -0.04em;
+      }
+      h2 {
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+      p {
+        margin: 8px 0 16px;
+      }
+      a {
+        color: #2f634b;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      .eyebrow {
+        color: #54694e;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr;
+        gap: 24px;
+        align-items: start;
+      }
+      section {
+        background: white;
+        border: 1px solid #d9ded5;
+        border-radius: 16px;
+        padding: 24px;
+        margin-top: 24px;
+        min-width: 0;
+      }
+      label {
+        display: block;
+        margin: 12px 0;
+      }
+      input,
+      select,
+      button,
+      textarea {
+        font: inherit;
+        max-width: 100%;
+      }
+      input[type='text'],
+      textarea {
+        width: 100%;
+        border: 1px solid #abb7ad;
+        border-radius: 7px;
+        padding: 10px;
+      }
+      textarea {
+        min-height: 330px;
+        font: 12px/1.6 monospace;
+      }
+      button,
+      select {
+        border: 1px solid #abb7ad;
+        border-radius: 8px;
+        background: #f4f5f0;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      button[aria-pressed='true'],
+      .primary {
+        background: #253d32;
+        color: white;
+      }
+      :focus-visible {
+        outline: 3px solid #609446;
+        outline-offset: 3px;
+      }
+      .muted {
+        color: #59655d;
+        font-size: 13px;
+      }
+      .notice {
+        background: #edf2e6;
+        border-radius: 8px;
+        padding: 12px;
+      }
+      #status {
+        min-height: 28px;
+      }
+      #stage {
+        position: relative;
+        width: 100%;
+        cursor: crosshair;
+        line-height: 0;
+      }
+      #stage img {
+        width: 100%;
+        height: auto;
+        display: block;
+        user-select: none;
+      }
+      .checker {
+        background: repeating-conic-gradient(#e1e5dd 0% 25%, #fff 0% 50%) 0 /
+          24px 24px;
+      }
+      #stage[data-background='light'] {
+        background: #fff;
+      }
+      #stage[data-background='dark'] {
+        background: #23352e;
+      }
+      .marker {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        width: 28px;
+        height: 28px;
+        display: grid;
+        place-items: center;
+        background: #205ba5;
+        color: #fff;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 1px #14365c;
+        border-radius: 50%;
+        pointer-events: none;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .marker.hip {
+        background: #9e3d20;
+      }
+      #cursor {
+        background: transparent;
+        border-style: dashed;
+      }
+      .point-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .point-buttons button {
+        text-align: left;
+        font-size: 13px;
+      }
+      .point-buttons small {
+        display: block;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 760px) {
+        .layout {
+          grid-template-columns: 1fr;
+          gap: 0;
+        }
+        main {
+          padding: 20px 16px 40px;
+        }
+        section {
+          padding: 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a href="../../">← 試着画面に戻る</a>
+      <p class="eyebrow">FITT-AR / 素材づくりの補助ツール</p>
+      <h1>写真に、4つの目印を。</h1>
+      <p>
+        透過PNGを選ぶ → 肩と腰をクリック → 設定をコピー。座標の計算は不要です。
+      </p>
+      <p class="muted">
+        選んだ写真はこのブラウザ内だけで処理します。サーバーへのアップロードや保存は行いません。背景の切り抜きは、事前に画像編集ソフトで行ってください。
+      </p>
+      <div class="layout">
+        <section>
+          <h2>1. 透過PNGを選ぶ</h2>
+          <label
+            >自分のTシャツ画像
+            <input id="file" type="file" accept="image/png,.png"
+          /></label>
+          <button id="example" type="button">デモの設定例を見る</button>
+          <p id="status" role="status" aria-live="polite"></p>
+          <label
+            >背景の確認
+            <select id="background">
+              <option value="checker">市松模様（透過確認）</option>
+              <option value="dark">濃い緑</option>
+              <option value="light">白</option>
+            </select>
+          </label>
+          <div
+            id="stage"
+            class="checker"
+            tabindex="0"
+            role="group"
+            aria-label="肩と腰を指定する画像。矢印キーで移動、Enterで確定"
+            hidden
+          >
+            <img
+              id="photo"
+              alt="位置合わせする正面向きのTシャツ"
+              draggable="false"
+            />
+            <span id="cursor" class="marker" hidden></span>
+          </div>
+          <p class="muted">
+            背景を切り替え、白い四角や市松模様が画像に焼き込まれていないか確認します。
+          </p>
+        </section>
+        <div>
+          <section>
+            <h2>2. 肩・腰を4か所クリック</h2>
+            <p class="notice">
+              左右は<strong>着ている人から見た左右</strong>です。正面の写真では「左肩」は<strong>画像の右側</strong>になります。
+            </p>
+            <p>
+              肩は袖口ではなく<strong>肩の関節が入る位置</strong>。腰は裾ではなく<strong>股関節が入る高さ</strong>を目安にします。点は仮の位置でよく、試着画面で微調整できます。
+            </p>
+            <div class="point-buttons" id="points"></div>
+            <p id="next" aria-live="polite"></p>
+            <button id="reset" type="button">4つの点をやり直す</button>
+            <p class="muted">
+              修正したい点のボタンを選び、画像をクリックし直してください。キーボードの場合は画像にフォーカスして矢印キー
+              → Enter。Shift＋矢印で細かく動かせます。
+            </p>
+          </section>
+          <section>
+            <h2>3. 設定をコピーして追加</h2>
+            <label
+              >アプリで表示する名前
+              <input
+                id="name"
+                type="text"
+                value="Tシャツ / Heather Gray"
+                maxlength="80"
+            /></label>
+            <label
+              >保存するファイル名
+              <input
+                id="filename"
+                type="text"
+                value="tshirt-gray.png"
+                spellcheck="false"
+            /></label>
+            <p class="muted">
+              半角の小文字・数字・ハイフン＋.png。画像をこの名前で
+              <code>public/garments/</code>
+              に置きます。このページからはファイルを書き換えません。
+            </p>
+            <label
+              >コピーする設定
+              <textarea
+                id="output"
+                readonly
+                aria-describedby="validation"
+                placeholder="画像を選び、4つの点を指定すると設定が表示されます。"
+              ></textarea>
+            </label>
+            <p id="validation" role="status"></p>
+            <button id="copy" type="button" class="primary" disabled>
+              設定をコピー
+            </button>
+            <p id="copy-status" role="status"></p>
+            <p class="muted">
+              <code>src/features/wardrobe/garments.ts</code> の
+              <code>export const demoGarment: Garment = { … }</code>
+              全体を置き換えます。上にある型定義は残してください。コピー後は変更を保存して試着画面を再読み込みします。
+            </p>
+          </section>
+        </div>
+      </div>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const keys = ['leftShoulder', 'rightShoulder', 'leftHip', 'rightHip']
+      const labels = [
+        '① 左肩（画像の右）',
+        '② 右肩（画像の左）',
+        '③ 左腰（画像の右）',
+        '④ 右腰（画像の左）',
+      ]
+      const demoPoints = [
+        { x: 0.78, y: 0.14 },
+        { x: 0.22, y: 0.14 },
+        { x: 0.72, y: 0.88 },
+        { x: 0.28, y: 0.88 },
+      ]
+      let points = [],
+        active = 0,
+        ready = false,
+        request = 0,
+        objectUrl = null,
+        cursor = { x: 0.5, y: 0.5 }
+      const pointButtons = labels.map((label, i) => {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.addEventListener('click', () => {
+          active = i
+          cursor = points[i] ?? { x: 0.5, y: 0.5 }
+          update()
+        })
+        $('points').append(button)
+        return button
+      })
+      function update() {
+        $('stage')
+          .querySelectorAll('.point')
+          .forEach((node) => node.remove())
+        pointButtons.forEach((button, i) => {
+          button.textContent = labels[i] + (points[i] ? ' ✓' : '')
+          button.setAttribute('aria-pressed', String(i === active))
+          button.disabled = !ready
+          if (!points[i]) return
+          const dot = document.createElement('span')
+          dot.className = 'marker point' + (i > 1 ? ' hip' : '')
+          dot.textContent = String(i + 1)
+          dot.style.left = points[i].x * 100 + '%'
+          dot.style.top = points[i].y * 100 + '%'
+          $('stage').append(dot)
+        })
+        $('next').textContent = !ready
+          ? '先に透過PNGを選んでください。'
+          : points.filter(Boolean).length < 4
+            ? '次は ' + labels[active] + ' をクリック。'
+            : '4点を指定できました。配置を確認し、必要なら点を選んで修正してください。'
+        $('cursor').hidden = true
+        $('output').value = ''
+        $('copy').disabled = true
+        $('copy-status').textContent = ''
+        $('validation').textContent = ''
+        if (!ready || points.filter(Boolean).length < 4) return
+        const [ls, rs, lh, rh] = points
+        if (
+          ls.x <= rs.x ||
+          lh.x <= rh.x ||
+          (lh.y + rh.y - ls.y - rs.y) / 2 < 0.05
+        ) {
+          $('validation').textContent =
+            '左右または上下が逆です。①③は画像の右、②④は左、腰は肩より下に指定してください。'
+          return
+        }
+        const filename = $('filename').value.trim(),
+          name = $('name').value.trim()
+        if (!/^[a-z0-9][a-z0-9-]*\.png$/.test(filename) || !name) {
+          $('validation').textContent =
+            '表示名と、半角小文字・数字・ハイフンのファイル名（例: my-tshirt.png）を入力してください。'
+          return
+        }
+        const anchors = Object.fromEntries(
+          keys.map((key, i) => [key, points[i]]),
+        )
+        const metadata = {
+          id: filename.slice(0, -4),
+          name,
+          image: '',
+          gender: 'unisex',
+          category: 'tshirt',
+          anchors,
+          scaleX: 1,
+          scaleY: 1,
+          offsetX: 0,
+          offsetY: 0,
+          rotationOffset: 0,
+        }
+        $('output').value =
+          'export const demoGarment: Garment = ' +
+          JSON.stringify(metadata, null, 2).replace(
+            '"image": ""',
+            '"image": `${import.meta.env.BASE_URL}garments/' + filename + '`',
+          )
+        $('copy').disabled = false
+        $('validation').textContent =
+          '設定をコピーできます。画像ファイルの配置も忘れずに。'
+      }
+      function clear() {
+        points = []
+        active = 0
+        update()
+      }
+      function place(x, y) {
+        if (!ready) return
+        points[active] = {
+          x: Math.round(Math.max(0, Math.min(1, x)) * 10000) / 10000,
+          y: Math.round(Math.max(0, Math.min(1, y)) * 10000) / 10000,
+        }
+        const missing = keys.findIndex((_, i) => !points[i])
+        if (missing >= 0) active = missing
+        update()
+      }
+      async function load(file) {
+        const id = ++request
+        ready = false
+        $('stage').hidden = true
+        $('status').textContent = '画像を確認しています…'
+        clear()
+        let candidateUrl
+        try {
+          let url = '../garments/tshirt-gray.png'
+          if (file) {
+            if (file.size > 10 * 1024 * 1024)
+              throw new Error(
+                '10MB以下のPNGにしてください。長辺1,000〜1,600pxが目安です。',
+              )
+            const bytes = new Uint8Array(await file.slice(0, 24).arrayBuffer())
+            if (
+              bytes.length < 24 ||
+              ![137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v)
+            )
+              throw new Error(
+                'PNGファイルを選んでください。JPEGの拡張子を変えるだけでは透過PNGになりません。',
+              )
+            const header = new DataView(bytes.buffer)
+            if (header.getUint32(16) > 4096 || header.getUint32(20) > 4096)
+              throw new Error(
+                '長辺を4,096px以下に縮小してください。おすすめは1,000〜1,600pxです。',
+              )
+            candidateUrl = URL.createObjectURL(file)
+            url = candidateUrl
+          }
+          const image = new Image()
+          image.src = url
+          await image.decode()
+          if (id !== request) return
+          const canvas = document.createElement('canvas')
+          canvas.width = image.naturalWidth
+          canvas.height = image.naturalHeight
+          const context = canvas.getContext('2d')
+          context.drawImage(image, 0, 0)
+          const pixels = context.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          ).data
+          let transparent = 0,
+            visible = 0
+          for (let i = 3; i < pixels.length; i += 4) {
+            if (pixels[i] === 0) transparent++
+            if (pixels[i] > 0) visible++
+          }
+          if (!transparent)
+            throw new Error(
+              '背景が透過されていません。背景を削除してPNGで書き出してください。',
+            )
+          if (!visible)
+            throw new Error(
+              '画像がすべて透明です。Tシャツのレイヤーを表示して書き出してください。',
+            )
+          if (objectUrl) URL.revokeObjectURL(objectUrl)
+          objectUrl = candidateUrl ?? null
+          candidateUrl = null
+          $('photo').src = url
+          $('stage').hidden = false
+          ready = true
+          $('name').value = file ? '自分のTシャツ' : 'Tシャツ / Heather Gray'
+          $('filename').value = file
+            ? /^[a-z0-9][a-z0-9-]*\.png$/.test(file.name)
+              ? file.name
+              : 'my-tshirt.png'
+            : 'tshirt-gray.png'
+          if (!file) points = demoPoints.map((p) => ({ ...p }))
+          $('status').textContent =
+            `${file ? '選択した画像' : 'デモの設定例'} · ${canvas.width} × ${canvas.height}px · 透過あり`
+          update()
+        } catch (error) {
+          if (id === request)
+            $('status').textContent =
+              error instanceof Error
+                ? error.message
+                : '画像を読み込めませんでした。別のPNGを選んでください。'
+        } finally {
+          if (candidateUrl) URL.revokeObjectURL(candidateUrl)
+        }
+      }
+      $('file').addEventListener('change', (event) => {
+        const file = event.target.files[0]
+        if (file) void load(file)
+        event.target.value = ''
+      })
+      $('example').addEventListener('click', () => void load())
+      $('reset').addEventListener('click', clear)
+      $('background').addEventListener('change', () => {
+        $('stage').dataset.background = $('background').value
+      })
+      for (const id of ['name', 'filename'])
+        $(id).addEventListener('input', update)
+      $('stage').addEventListener('click', (event) => {
+        const rect = $('photo').getBoundingClientRect()
+        place(
+          (event.clientX - rect.left) / rect.width,
+          (event.clientY - rect.top) / rect.height,
+        )
+      })
+      $('stage').addEventListener('keydown', (event) => {
+        if (!ready) return
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          place(cursor.x, cursor.y)
+          return
+        }
+        const delta = {
+          ArrowLeft: [-1, 0],
+          ArrowRight: [1, 0],
+          ArrowUp: [0, -1],
+          ArrowDown: [0, 1],
+        }[event.key]
+        if (!delta) return
+        event.preventDefault()
+        const step = event.shiftKey ? 0.001 : 0.01
+        cursor = {
+          x: Math.max(0, Math.min(1, cursor.x + delta[0] * step)),
+          y: Math.max(0, Math.min(1, cursor.y + delta[1] * step)),
+        }
+        $('cursor').hidden = false
+        $('cursor').style.left = cursor.x * 100 + '%'
+        $('cursor').style.top = cursor.y * 100 + '%'
+      })
+      $('copy').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText($('output').value)
+          $('copy-status').textContent =
+            'コピーしました。garments.ts の demoGarment を置き換えてください。'
+        } catch {
+          $('output').focus()
+          $('output').select()
+          $('copy-status').textContent =
+            '設定を選択しました。Ctrl+C（Macは⌘C）でコピーしてください。'
+        }
+      })
+      void load()
+    </script>
+  </body>
+</html>

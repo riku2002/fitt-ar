@@ -29,7 +29,7 @@ export function CameraView() {
   const [status, setStatus] = useState<CameraStatus>('idle')
   const [error, setError] = useState('')
   const [mirrored, setMirrored] = useState(true)
-  const [showSkeleton, setShowSkeleton] = useState(true)
+  const [showSkeleton, setShowSkeleton] = useState(false)
   const [showGarment, setShowGarment] = useState(true)
   const [resolution, setResolution] = useState('')
 
@@ -179,10 +179,10 @@ export function CameraView() {
           肩と腰に合わせて、Tシャツがあなたの動きに追従します。
         </p>
         <div className="garment-preview">
-          <img src={demoGarment.image} alt="セージ色のデモTシャツ" />
+          <img src={demoGarment.image} alt={`${demoGarment.name}の透過素材`} />
           <div>
             <strong>{demoGarment.name}</strong>
-            <p>位置・大きさ・傾きを確認するための仮素材</p>
+            <p>布の質感と縫い目を残した、実写のTシャツ</p>
           </div>
         </div>
         <ol className="steps">

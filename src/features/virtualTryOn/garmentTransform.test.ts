@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { calculateGarmentTransform } from './garmentTransform'
 import type { GarmentTransform } from './garmentTransform'
-import { demoGarment } from '../wardrobe/garments'
+import type { Garment } from '../wardrobe/garments'
 import { makePoseFrame } from '../../test/poseFixture'
+
+// Fixed geometry fixture: placement expectations must not depend on the demo asset.
+const demoGarment: Garment = {
+  id: 'geometry-fixture',
+  name: 'Geometry fixture',
+  image: '',
+  gender: 'unisex',
+  category: 'tshirt',
+  anchors: {
+    leftShoulder: { x: 0.7, y: 0.2 },
+    rightShoulder: { x: 0.3, y: 0.2 },
+    leftHip: { x: 0.7, y: 0.8 },
+    rightHip: { x: 0.3, y: 0.8 },
+  },
+  scaleX: 1,
+  scaleY: 1,
+  offsetX: 0,
+  offsetY: 0,
+  rotationOffset: 0,
+}
 
 const project = (m: GarmentTransform, x: number, y: number) => ({
   x: m.a * x + m.c * y + m.e,

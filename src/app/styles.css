@@ -202,8 +202,9 @@ h1 span {
   background: #eef1e8;
 }
 .garment-preview img {
-  width: 64px;
-  height: 64px;
+  width: 88px;
+  height: 104px;
+  flex-shrink: 0;
   object-fit: contain;
 }
 .garment-preview strong {

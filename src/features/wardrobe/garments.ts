@@ -25,16 +25,17 @@ export interface Garment {
 }
 
 export const demoGarment: Garment = {
-  id: 'demo-tshirt-sage',
-  name: 'デモTシャツ / Sage',
-  image: `${import.meta.env.BASE_URL}garments/demo-tshirt-sage.png`,
+  id: 'tshirt-gray',
+  name: 'Tシャツ / Heather Gray',
+  image: `${import.meta.env.BASE_URL}garments/tshirt-gray.png`,
   gender: 'unisex',
   category: 'tshirt',
   anchors: {
-    leftShoulder: { x: 0.7, y: 0.2 },
-    rightShoulder: { x: 0.3, y: 0.2 },
-    leftHip: { x: 0.7, y: 0.8 },
-    rightHip: { x: 0.3, y: 0.8 },
+    // Normalized against the full 893 × 1024 PNG, including transparent space.
+    leftShoulder: { x: 0.78, y: 0.14 },
+    rightShoulder: { x: 0.22, y: 0.14 },
+    leftHip: { x: 0.72, y: 0.88 },
+    rightHip: { x: 0.28, y: 0.88 },
   },
   scaleX: 1,
   scaleY: 1,

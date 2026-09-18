@@ -70,6 +70,10 @@ describe('CameraView', () => {
     expect(video.muted).toBe(true)
     expect(video.parentElement).toHaveClass('is-mirrored')
     expect(
+      screen.getByRole('checkbox', { name: '骨格を表示' }),
+    ).not.toBeChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: '骨格を表示' }))
+    expect(
       screen.getByLabelText('肩・肘・手首・腰の骨格表示').parentElement,
     ).toBe(video.parentElement)
     fireEvent.click(
@@ -140,6 +144,7 @@ describe('CameraView', () => {
     await screen.findByRole('button', { name: 'カメラを停止' })
     expect(startPoseSession).toHaveBeenCalledOnce()
     const dispose = vi.mocked(startPoseSession).mock.results[0].value
+    fireEvent.click(screen.getByRole('checkbox', { name: '骨格を表示' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '骨格を表示' }))
     expect(dispose).not.toHaveBeenCalled()
     expect(
