@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cameraErrorMessage, requestCamera, stopCamera } from './cameraService'
+import { PoseOverlay } from '../pose/PoseOverlay'
 
 type CameraStatus = 'idle' | 'requesting' | 'playing' | 'error'
 
@@ -27,6 +28,7 @@ export function CameraView() {
   const [status, setStatus] = useState<CameraStatus>('idle')
   const [error, setError] = useState('')
   const [mirrored, setMirrored] = useState(true)
+  const [poseEnabled, setPoseEnabled] = useState(true)
   const [resolution, setResolution] = useState('')
 
   const release = useCallback(() => {
@@ -118,14 +120,19 @@ export function CameraView() {
           </span>
         </div>
         <div className="camera-stage">
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            aria-label="カメラのライブ映像"
-            className={`${isPlaying ? 'is-visible' : ''} ${mirrored ? 'is-mirrored' : ''}`}
-          />
+          <div className={`camera-content ${mirrored ? 'is-mirrored' : ''}`}>
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              aria-label="カメラのライブ映像"
+              className={isPlaying ? 'is-visible' : ''}
+            />
+            {isPlaying && poseEnabled && (
+              <PoseOverlay videoRef={videoRef} mirrored={mirrored} />
+            )}
+          </div>
           {!isPlaying && (
             <div className="camera-placeholder">
               <div
@@ -159,10 +166,10 @@ export function CameraView() {
         </div>
       </div>
       <aside className="control-panel" aria-labelledby="setup-title">
-        <span className="step-number">01 / CAMERA CHECK</span>
-        <h2 id="setup-title">カメラをつなぐ</h2>
+        <span className="step-number">02 / POSE TRACKING</span>
+        <h2 id="setup-title">身体の動きを映す</h2>
         <p className="control-copy">
-          この端末のカメラを使って、リアルタイムの映像を確認します。
+          肩・肘・手首・腰に重なる点と線が、あなたの動きに追従します。
         </p>
         <ol className="steps">
           <li>
@@ -182,8 +189,8 @@ export function CameraView() {
           <li>
             <span>3</span>
             <div>
-              <strong>映像をチェック</strong>
-              <p>自分の姿が映れば準備完了です。</p>
+              <strong>一歩下がって動いてみる</strong>
+              <p>肩から腰まで映して、腕を上げてみましょう。</p>
             </div>
           </li>
         </ol>
@@ -193,6 +200,15 @@ export function CameraView() {
             type="checkbox"
             checked={mirrored}
             onChange={(event) => setMirrored(event.target.checked)}
+          />
+          <span className="toggle-track" aria-hidden="true" />
+        </label>
+        <label className="mirror-toggle">
+          <span>姿勢推定・骨格表示</span>
+          <input
+            type="checkbox"
+            checked={poseEnabled}
+            onChange={(event) => setPoseEnabled(event.target.checked)}
           />
           <span className="toggle-track" aria-hidden="true" />
         </label>

@@ -17,9 +17,9 @@ export function App() {
       </header>
       <main>
         <section className="intro" aria-labelledby="page-title">
-          <p className="eyebrow">THE FIRST STEP</p>
+          <p className="eyebrow">THE NEXT STEP</p>
           <h1 id="page-title">
-            Hello, <span>camera.</span>
+            Hello, <span>motion.</span>
           </h1>
         </section>
         <CameraView />

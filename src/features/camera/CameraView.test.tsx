@@ -2,6 +2,11 @@ import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CameraView } from './CameraView'
+import { startPoseSession } from '../pose/poseSession'
+
+vi.mock('../pose/poseSession', () => ({
+  startPoseSession: vi.fn(() => vi.fn()),
+}))
 
 function fakeStream() {
   const track = { stop: vi.fn(), onended: null as (() => void) | null }
@@ -51,9 +56,14 @@ describe('CameraView', () => {
     ) as HTMLVideoElement
     expect(video.srcObject).toBe(stream)
     expect(video.muted).toBe(true)
-    expect(video).toHaveClass('is-mirrored')
-    fireEvent.click(screen.getByRole('checkbox'))
-    expect(video).not.toHaveClass('is-mirrored')
+    expect(video.parentElement).toHaveClass('is-mirrored')
+    expect(
+      screen.getByLabelText('肩・肘・手首・腰の骨格表示').parentElement,
+    ).toBe(video.parentElement)
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '鏡のように左右反転' }),
+    )
+    expect(video.parentElement).not.toHaveClass('is-mirrored')
     fireEvent.click(screen.getByRole('button', { name: 'カメラを停止' }))
     expect(track.stop).toHaveBeenCalledOnce()
     expect(video.srcObject).toBeNull()
@@ -108,6 +118,30 @@ describe('CameraView', () => {
     await screen.findByRole('button', { name: 'カメラを停止' })
     view.unmount()
     expect(track.stop).toHaveBeenCalledOnce()
+  })
+
+  it('starts pose only with a playing camera and disposes it on toggle and stop', async () => {
+    getUserMedia.mockResolvedValue(fakeStream().stream)
+    render(<CameraView />)
+    expect(startPoseSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+    await screen.findByRole('button', { name: 'カメラを停止' })
+    expect(startPoseSession).toHaveBeenCalledOnce()
+    const dispose = vi.mocked(startPoseSession).mock.results[0].value
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '姿勢推定・骨格表示' }),
+    )
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(
+      screen.queryByLabelText('肩・肘・手首・腰の骨格表示'),
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '姿勢推定・骨格表示' }),
+    )
+    expect(startPoseSession).toHaveBeenCalledTimes(2)
+    const secondDispose = vi.mocked(startPoseSession).mock.results[1].value
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを停止' }))
+    expect(secondDispose).toHaveBeenCalledOnce()
   })
 
   it('releases a stream granted after unmount', async () => {
