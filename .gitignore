@@ -9,5 +9,6 @@ coverage/
 *.local
 *.tsbuildinfo
 .vercel/
+public/mediapipe/
 docs/development-environment.md
 docs/integrated-design.md
