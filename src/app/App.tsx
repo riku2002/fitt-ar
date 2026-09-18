@@ -14,7 +14,6 @@ export function App() {
           </span>
           Realtime AR Try-On
         </a>
-        <span className="stage-label">DEVELOPMENT / PHASE 0</span>
       </header>
       <main>
         <section className="intro" aria-labelledby="page-title">
@@ -22,17 +21,11 @@ export function App() {
           <h1 id="page-title">
             Hello, <span>camera.</span>
           </h1>
-          <p className="intro-copy">
-            リアルタイム試着の、はじめの一歩。
-            <br />
-            カメラをつないで、あなたの映像を映してみましょう。
-          </p>
         </section>
         <CameraView />
       </main>
       <footer className="site-footer">
         <span>REALTIME AR TRY-ON</span>
-        <span>カメラ動作確認版 · 姿勢推定・AR試着は次のステップで追加</span>
       </footer>
     </div>
   )

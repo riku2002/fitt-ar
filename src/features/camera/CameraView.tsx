@@ -222,13 +222,6 @@ export function CameraView() {
             許可画面が出ない場合は、アドレスバーのカメラ権限を確認してください。
           </p>
         )}
-        <div className="privacy-note">
-          <span aria-hidden="true">◈</span>
-          <p>
-            <strong>あなたの映像は、この端末の中だけ。</strong>
-            録画・外部送信は行いません。マイクも使用しません。
-          </p>
-        </div>
       </aside>
     </section>
   )
