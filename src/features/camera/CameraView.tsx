@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cameraErrorMessage, requestCamera, stopCamera } from './cameraService'
 import { VirtualMirror } from '../virtualTryOn/VirtualMirror'
-import { demoGarment } from '../wardrobe/garments'
+import { garments } from '../wardrobe/garments'
+import { GarmentSelector } from '../wardrobe/GarmentSelector'
+import type { SwipeDirection } from '../gesture/swipeDetector'
 
 type CameraStatus = 'idle' | 'requesting' | 'playing' | 'error'
 
@@ -32,6 +34,20 @@ export function CameraView() {
   const [showSkeleton, setShowSkeleton] = useState(false)
   const [showGarment, setShowGarment] = useState(true)
   const [resolution, setResolution] = useState('')
+  const [garmentIndex, setGarmentIndex] = useState(0)
+  const [swipeEnabled, setSwipeEnabled] = useState(true)
+  const [gestureResetKey, setGestureResetKey] = useState(0)
+  const onSwipe = useCallback((direction: SwipeDirection) => {
+    setGarmentIndex(
+      (index) =>
+        (index + (direction === 'next' ? 1 : -1) + garments.length) %
+        garments.length,
+    )
+  }, [])
+  const selectGarment = useCallback((index: number) => {
+    setGarmentIndex(index)
+    setGestureResetKey((key) => key + 1)
+  }, [])
 
   const release = useCallback(() => {
     requestId.current += 1
@@ -137,6 +153,10 @@ export function CameraView() {
                 mirrored={mirrored}
                 showSkeleton={showSkeleton}
                 showGarment={showGarment}
+                garment={garments[garmentIndex]}
+                swipeEnabled={swipeEnabled}
+                gestureResetKey={gestureResetKey}
+                onSwipe={onSwipe}
               />
             )}
           </div>
@@ -173,24 +193,43 @@ export function CameraView() {
         </div>
       </div>
       <aside className="control-panel" aria-labelledby="setup-title">
-        <span className="step-number">03 / VIRTUAL TRY-ON</span>
-        <h2 id="setup-title">一着を、重ねてみる</h2>
+        <span className="step-number">04 / SWIPE TO TRY</span>
+        <h2 id="setup-title">手を動かして、次の一着へ</h2>
         <p className="control-copy">
-          肩と腰に合わせて、Tシャツがあなたの動きに追従します。
+          胸の高さで片手を横に動かすと、服が切り替わります。
         </p>
-        <div className="garment-preview">
-          <img src={demoGarment.image} alt={`${demoGarment.name}の透過素材`} />
-          <div>
-            <strong>{demoGarment.name}</strong>
-            <p>布の質感と縫い目を残した、実写のTシャツ</p>
-          </div>
-        </div>
+        {isPlaying || isRequesting ? (
+          <button className="primary-button stop-button" onClick={stop}>
+            {isRequesting ? '接続をキャンセル' : 'カメラを停止'}
+            <span aria-hidden="true">□</span>
+          </button>
+        ) : (
+          <button className="primary-button" onClick={() => void start()}>
+            {status === 'error' ? 'もう一度試す' : 'カメラを起動'}
+            <span aria-hidden="true">↗</span>
+          </button>
+        )}
+        {error && (
+          <p className="error-message" role="alert">
+            {error}
+          </p>
+        )}
+        {isRequesting && (
+          <p className="pending-message">
+            許可画面が出ない場合は、アドレスバーのカメラ権限を確認してください。
+          </p>
+        )}
+        <GarmentSelector index={garmentIndex} onSelect={selectGarment} />
+        <p className="swipe-guide">
+          画面で 右 → 左：次の服
+          <br />左 → 右：前の服
+        </p>
         <ol className="steps">
           <li>
             <span>1</span>
             <div>
               <strong>カメラを起動</strong>
-              <p>下のボタンから接続を開始します。</p>
+              <p>起動ボタンから接続を開始します。</p>
             </div>
           </li>
           <li>
@@ -203,8 +242,10 @@ export function CameraView() {
           <li>
             <span>3</span>
             <div>
-              <strong>一歩下がって動いてみる</strong>
-              <p>正面を向いて肩と腰を映し、身体を傾けてみましょう。</p>
+              <strong>胸の高さで手をスワイプ</strong>
+              <p>
+                正面を向いて肩・腰・手首を映します。切り替わったら一度手を下ろしてください。
+              </p>
             </div>
           </li>
         </ol>
@@ -227,6 +268,16 @@ export function CameraView() {
           <span className="toggle-track" aria-hidden="true" />
         </label>
         <label className="mirror-toggle">
+          <span>手のスワイプで切り替え</span>
+          <input
+            type="checkbox"
+            checked={swipeEnabled}
+            disabled={!showGarment}
+            onChange={(event) => setSwipeEnabled(event.target.checked)}
+          />
+          <span className="toggle-track" aria-hidden="true" />
+        </label>
+        <label className="mirror-toggle">
           <span>骨格を表示</span>
           <input
             type="checkbox"
@@ -235,32 +286,6 @@ export function CameraView() {
           />
           <span className="toggle-track" aria-hidden="true" />
         </label>
-        {isPlaying || isRequesting ? (
-          <button className="primary-button stop-button" onClick={stop}>
-            {isRequesting ? '接続をキャンセル' : 'カメラを停止'}
-            <span aria-hidden="true">□</span>
-          </button>
-        ) : (
-          <button className="primary-button" onClick={() => void start()}>
-            {status === 'error' ? 'もう一度試す' : 'カメラを起動'}
-            <span aria-hidden="true">↗</span>
-          </button>
-        )}
-        {error && (
-          <p className="error-message" role="alert">
-            {error}
-          </p>
-        )}
-        {isPlaying && (
-          <p className="success-message">
-            接続できました。カメラは正常に動作しています。
-          </p>
-        )}
-        {isRequesting && (
-          <p className="pending-message">
-            許可画面が出ない場合は、アドレスバーのカメラ権限を確認してください。
-          </p>
-        )}
       </aside>
     </section>
   )

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPoseChannel } from '../pose/poseChannel'
-import { demoGarment } from '../wardrobe/garments'
+import { demoGarment, garments } from '../wardrobe/garments'
 import { makePoseFrame } from '../../test/poseFixture'
 import { GarmentOverlay } from './GarmentOverlay'
 
@@ -117,4 +117,26 @@ it('unsubscribes and ignores late image loads after unmount', async () => {
   await act(async () => resolve())
   source.publish(makePoseFrame())
   await waitFor(() => expect(context.drawImage).not.toHaveBeenCalled())
+})
+
+it('keeps the latest garment when an older image finishes loading after a switch', async () => {
+  let finishOld!: () => void
+  decode.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finishOld = resolve
+    }),
+  )
+  const source = createPoseChannel()
+  const view = render(
+    <GarmentOverlay source={source} garment={garments[0]} mirrored />,
+  )
+  act(() => source.publish(makePoseFrame()))
+  view.rerender(
+    <GarmentOverlay source={source} garment={garments[1]} mirrored />,
+  )
+  await screen.findByText(/試着中/)
+  expect(context.drawImage).toHaveBeenCalledOnce()
+  expect(context.drawImage.mock.calls[0][0].src).toBe(garments[1].image)
+  await act(async () => finishOld())
+  expect(context.drawImage).toHaveBeenCalledOnce()
 })
