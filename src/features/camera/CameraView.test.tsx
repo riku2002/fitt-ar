@@ -5,7 +5,8 @@ import { CameraView } from './CameraView'
 import { startPoseSession } from '../pose/poseSession'
 import { makeSwipeFrame } from '../../test/swipeFixture'
 
-vi.mock('../pose/poseSession', () => ({
+vi.mock('../pose/poseSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../pose/poseSession')>()),
   startPoseSession: vi.fn(() => vi.fn()),
 }))
 

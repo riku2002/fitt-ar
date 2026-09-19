@@ -4,6 +4,7 @@ import { createPoseChannel } from '../pose/poseChannel'
 import { startPoseSession } from '../pose/poseSession'
 import type { PoseState } from '../pose/poseSession'
 import { PoseOverlay } from '../pose/PoseOverlay'
+import { PoseDiagnostics } from '../pose/PoseDiagnostics'
 import { GarmentOverlay } from './GarmentOverlay'
 import type { Garment } from '../wardrobe/garments'
 import { SwipeGesture } from '../gesture/SwipeGesture'
@@ -61,6 +62,7 @@ function MirrorSession({
         <GarmentOverlay source={source} garment={garment} mirrored={mirrored} />
       )}
       {showSkeleton && <PoseOverlay source={source} />}
+      <PoseDiagnostics source={source} mirrored={mirrored} />
       <div className={`pose-hud ${mirrored ? 'is-mirrored' : ''}`}>
         <p role="status" className={`pose-message pose-${state}`}>
           {state === 'loading'

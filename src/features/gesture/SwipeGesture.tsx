@@ -13,7 +13,7 @@ export function SwipeGesture({
   resetKey: number
   onSwipe: (direction: SwipeDirection) => void
 }) {
-  const [message, setMessage] = useState('肩・腰と手首を画面に映してください')
+  const [message, setMessage] = useState('両肩と手首を画面に映してください')
   useEffect(() => {
     const detector = createSwipeDetector(mirrored)
     let lastMessage = ''
@@ -26,12 +26,14 @@ export function SwipeGesture({
       }
       const next =
         state === 'searching'
-          ? '肩・腰と手首を画面に映してください'
-          : state === 'cooldown'
-            ? `${lastDirection === 'next' ? '← 次の服へ' : '前の服へ →'} · 手を下ろして少し待ってください`
-            : state === 'ready'
-              ? '手を横へスワイプ · ← 次の服 ／ 前の服 →'
-              : '片手を胸の高さに上げてください'
+          ? '両肩を画面に映してください'
+          : state === 'hand-missing'
+            ? '手首をカメラに見せてください'
+            : state === 'cooldown'
+              ? `${lastDirection === 'next' ? '← 次の服へ' : '前の服へ →'} · 手を少し止めると次の操作ができます`
+              : state === 'ready'
+                ? '手を横へスワイプ · ← 次の服 ／ 前の服 →'
+                : '片手を胸の高さに上げてください'
       if (next !== lastMessage) {
         lastMessage = next
         setMessage(next)

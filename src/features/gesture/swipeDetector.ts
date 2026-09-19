@@ -1,24 +1,27 @@
-import { isVisible, type PosePoint } from '../pose/poseGeometry'
+import { isVisible } from '../pose/poseGeometry'
 import type { PoseFrame } from '../pose/poseTypes'
 
 export type SwipeDirection = 'next' | 'previous'
-export type SwipeState = 'searching' | 'raise-hand' | 'ready' | 'cooldown'
+export type SwipeState =
+  'searching' | 'hand-missing' | 'raise-hand' | 'ready' | 'cooldown'
 export interface SwipeResult {
   state: SwipeState
   direction?: SwipeDirection
 }
 
-// Distances are in shoulder-width units; timings use the inference timestamp.
+// Distances use shoulder widths and durations use elapsed time, not frame counts.
 export const SWIPE = {
-  windowMs: 650,
-  minDurationMs: 160,
-  maxGapMs: 250,
-  minSamples: 4,
-  distance: 0.8,
-  verticalRange: 0.35,
-  consistency: 0.82,
-  maxStep: 0.65,
-  cooldownMs: 900,
+  windowMs: 900,
+  minDurationMs: 90,
+  maxGapMs: 320,
+  minSamples: 3,
+  distance: 0.65,
+  minSpeed: 0.75,
+  verticalRange: 0.6,
+  consistency: 0.78,
+  cooldownMs: 600,
+  settleMs: 240,
+  settleRange: 0.14,
 } as const
 
 interface Sample {
@@ -30,21 +33,22 @@ interface Sample {
   width: number
 }
 
-const confident = (point: PosePoint | undefined): point is PosePoint =>
-  isVisible(point) && point.visibility >= 0.65 && (point.presence ?? 1) >= 0.65
-
-/** Either wrist may trigger, but histories and identity are never mixed. */
+/** Either wrist may trigger; never join samples from different hands. */
 export function createSwipeDetector(mirrored: boolean) {
   const histories: Sample[][] = [[], []]
   let lastTime = -Infinity
   let dimensions = ''
   let cooldownUntil = -Infinity
   let lockedHand: number | null = null
-  let loweredSince: number | undefined
-  const clear = () => {
-    histories.forEach((history) => (history.length = 0))
-    loweredSince = undefined
+  let releaseAnchor: Sample | undefined
+  let absentSince: number | undefined
+  const clear = () => histories.forEach((history) => (history.length = 0))
+  const resetMotion = () => {
+    clear()
+    releaseAnchor = undefined
+    absentSince = undefined
   }
+
   return {
     push(frame: PoseFrame | null): SwipeResult {
       if (
@@ -55,83 +59,85 @@ export function createSwipeDetector(mirrored: boolean) {
         frame.width <= 0 ||
         frame.height <= 0
       ) {
-        clear()
+        resetMotion()
         return { state: 'searching' }
       }
       const { landmarks: p, timestamp: time, width, height } = frame
-      const size = `${width}:${height}`
       if (time <= lastTime) {
-        clear()
+        resetMotion()
         return { state: 'searching' }
       }
-      if (time - lastTime > SWIPE.maxGapMs || dimensions !== size) clear()
+      const size = `${width}:${height}`
+      if (time - lastTime > SWIPE.maxGapMs || dimensions !== size) resetMotion()
       lastTime = time
       dimensions = size
-      const [ls, rs, lh, rh] = [p[11], p[12], p[23], p[24]]
-      if (![ls, rs, lh, rh].every(confident)) {
-        clear()
-        return { state: 'searching' }
-      }
+
+      // Hips are required to draw a garment, but not to recognize a hand swipe.
+      // Keep a short history through a missed shoulder/wrist observation; do not
+      // fabricate coordinates or accept a gesture until tracking returns.
+      const [ls, rs] = [p[11], p[12]]
+      if (!isVisible(ls) || !isVisible(rs)) return { state: 'searching' }
       const centerX = ((ls.x + rs.x) * width) / 2
       const centerY = ((ls.y + rs.y) * height) / 2
       const dx = (ls.x - rs.x) * width
       const dy = (ls.y - rs.y) * height
       const shoulderWidth = Math.hypot(dx, dy)
-      const hipX = ((lh.x + rh.x) * width) / 2 - centerX
-      const hipY = ((lh.y + rh.y) * height) / 2 - centerY
-      const torsoHeight = (-hipX * dy + hipY * dx) / shoulderWidth
-      if (dx <= 0 || shoulderWidth < 40 || torsoHeight < 40) {
-        clear()
+      if (dx <= 0 || shoulderWidth < 40) {
+        resetMotion()
         return { state: 'searching' }
       }
-      const wrists = [p[15], p[16]]
-      const torsoPosition = (point: PosePoint) =>
-        (-(point.x * width - centerX) * dy +
-          (point.y * height - centerY) * dx) /
-        shoulderWidth /
-        torsoHeight
-
-      // Lock both hands after a trigger, including the return stroke. Re-arm
-      // after lowering the triggering hand (or it leaves the frame) and 900ms.
-      if (lockedHand !== null) {
-        const wrist = wrists[lockedHand]
-        const seen = confident(wrist)
-        if (!seen || torsoPosition(wrist) >= 0.8) {
-          loweredSince ??= time
-          if (time - loweredSince >= (seen ? 160 : 300)) lockedHand = null
-        } else loweredSince = undefined
-      }
-      if (lockedHand !== null || time < cooldownUntil) {
-        histories.forEach((history) => (history.length = 0))
-        return { state: 'cooldown' }
-      }
-
-      const candidates: { hand: number; direction: SwipeDirection }[] = []
-      let raised = false
-      wrists.forEach((wrist, hand) => {
-        const history = histories[hand]
-        if (
-          !confident(wrist) ||
-          torsoPosition(wrist) < -0.15 ||
-          torsoPosition(wrist) > 0.7 ||
-          Math.abs(wrist.x * width - centerX) > shoulderWidth * 1.6
-        ) {
-          history.length = 0
-          return
-        }
-        raised = true
-        const sample: Sample = {
+      const samples = [p[15], p[16]].map((wrist): Sample | undefined => {
+        if (!isVisible(wrist)) return undefined
+        const px = wrist.x * width - centerX
+        const py = wrist.y * height - centerY
+        return {
           time,
-          x:
-            ((wrist.x * width - centerX) / shoulderWidth) * (mirrored ? -1 : 1),
-          y: (wrist.y * height - centerY) / shoulderWidth,
+          x: (px / shoulderWidth) * (mirrored ? -1 : 1),
+          y: (-px * dy + py * dx) / (shoulderWidth * shoulderWidth),
           rawX: wrist.x * width * (mirrored ? -1 : 1),
           centerX,
           width: shoulderWidth,
         }
-        const previous = history.at(-1)
-        if (previous && Math.abs(sample.x - previous.x) > SWIPE.maxStep)
+      })
+
+      // A brief pause OR lowering the hand re-arms. A continuous return stroke
+      // stays locked, but the user no longer has to reach a detected hip.
+      if (lockedHand !== null) {
+        const sample = samples[lockedHand]
+        let released: boolean
+        if (!sample || sample.y > 1.05) {
+          releaseAnchor = undefined
+          absentSince ??= time
+          released = time - absentSince >= (sample ? 160 : 350)
+        } else {
+          absentSince = undefined
+          if (
+            !releaseAnchor ||
+            Math.hypot(sample.x - releaseAnchor.x, sample.y - releaseAnchor.y) >
+              SWIPE.settleRange
+          )
+            releaseAnchor = sample
+          released = time - releaseAnchor.time >= SWIPE.settleMs
+        }
+        clear()
+        if (!released || time < cooldownUntil) return { state: 'cooldown' }
+        lockedHand = null
+        releaseAnchor = undefined
+        absentSince = undefined
+      }
+
+      const candidates: { hand: number; direction: SwipeDirection }[] = []
+      let raised = false
+      samples.forEach((sample, hand) => {
+        const history = histories[hand]
+        if (history.length && time - history.at(-1)!.time > SWIPE.maxGapMs)
           history.length = 0
+        if (!sample) return
+        if (sample.y < -0.45 || sample.y > 1.05 || Math.abs(sample.x) > 1.8) {
+          history.length = 0
+          return
+        }
+        raised = true
         history.push(sample)
         while (history[0].time < time - SWIPE.windowMs) history.shift()
         for (
@@ -141,20 +147,26 @@ export function createSwipeDetector(mirrored: boolean) {
         ) {
           const path = history.slice(start)
           const first = path[0]
+          const elapsed = time - first.time
           const movement = sample.x - first.x
+          const distance = Math.abs(movement)
           if (
-            time - first.time < SWIPE.minDurationMs ||
-            Math.abs(movement) < SWIPE.distance
+            elapsed < SWIPE.minDurationMs ||
+            distance < SWIPE.distance ||
+            (distance * 1000) / elapsed < SWIPE.minSpeed
           )
             continue
-          const travel = path
-            .slice(1)
-            .reduce((sum, s, i) => sum + Math.abs(s.x - path[i].x), 0)
+          const steps = path.slice(1).map((s, i) => Math.abs(s.x - path[i].x))
+          const travel = steps.reduce((sum, step) => sum + step, 0)
           const ys = path.map((s) => s.y)
           if (
             Math.max(...ys) - Math.min(...ys) > SWIPE.verticalRange ||
-            Math.abs(movement) / travel < SWIPE.consistency ||
-            Math.abs(sample.centerX - first.centerX) / shoulderWidth > 0.3 ||
+            Math.abs(sample.y - first.y) > distance * 0.7 ||
+            distance / travel < SWIPE.consistency ||
+            // Require movement across at least two observations. Unlike a
+            // fixed per-frame jump limit, this also works at 8–10 FPS.
+            Math.max(...steps) > distance * 0.85 ||
+            Math.abs(sample.centerX - first.centerX) / shoulderWidth > 0.35 ||
             Math.max(sample.width, first.width) /
               Math.min(sample.width, first.width) >
               1.3 ||
@@ -172,18 +184,21 @@ export function createSwipeDetector(mirrored: boolean) {
       })
       if (candidates.length) {
         clear()
-        // Two hands moving in opposite directions is ambiguous, not a swipe.
-        if (
-          candidates.some(
-            (candidate) => candidate.direction !== candidates[0].direction,
-          )
-        )
+        if (candidates.some((c) => c.direction !== candidates[0].direction))
           return { state: 'ready' }
         lockedHand = candidates[0].hand
         cooldownUntil = time + SWIPE.cooldownMs
+        releaseAnchor = samples[lockedHand]
+        absentSince = undefined
         return { state: 'cooldown', direction: candidates[0].direction }
       }
-      return { state: raised ? 'ready' : 'raise-hand' }
+      return {
+        state: raised
+          ? 'ready'
+          : samples.some(Boolean)
+            ? 'raise-hand'
+            : 'hand-missing',
+      }
     },
   }
 }

@@ -51,17 +51,19 @@ describe('wrist swipes', () => {
 
   it('requires a short horizontal movement rather than vertical or slow movement', () => {
     const vertical = path.map((x, i) =>
-      makeSwipeFrame(i * 80, x, 15, 0.05 + i * 0.15),
+      makeSwipeFrame(i * 80, x, 15, 0.05 + i * 0.3),
     )
-    const slow = path.map((x, i) => makeSwipeFrame(i * 240, x))
+    const slow = Array.from({ length: 10 }, (_, i) =>
+      makeSwipeFrame(i * 240, -0.5 + i * 0.1),
+    )
     expect(directions(createSwipeDetector(false), vertical)).toEqual([])
     expect(directions(createSwipeDetector(false), slow)).toEqual([])
   })
 
   it('ignores lowered hands and low-confidence wrists or torsos', () => {
-    for (const point of [11, 12, 23, 24, 15]) {
+    for (const point of [11, 12, 15]) {
       const input = frames().map((frame) => {
-        frame.landmarks[point].visibility = 0.6
+        frame.landmarks[point].visibility = 0.4
         return frame
       })
       expect(directions(createSwipeDetector(false), input)).toEqual([])
@@ -69,7 +71,7 @@ describe('wrist swipes', () => {
     expect(
       directions(
         createSwipeDetector(false),
-        path.map((x, i) => makeSwipeFrame(i * 80, x, 15, 1)),
+        path.map((x, i) => makeSwipeFrame(i * 80, x, 15, 1.2)),
       ),
     ).toEqual([])
   })
@@ -94,10 +96,8 @@ describe('wrist swipes', () => {
   })
 
   it('clears partial movement after tracking loss, stale frames or resizing', () => {
-    const lostWrist = makeSwipeFrame(180, 0)
-    lostWrist.landmarks[15].visibility = 0
     const badTimestamp = { ...makeSwipeFrame(180, 0), timestamp: NaN }
-    const interruptions = [null, lostWrist, badTimestamp, makeSwipeFrame(80, 0)]
+    const interruptions = [null, badTimestamp, makeSwipeFrame(80, 0)]
     for (const interruption of interruptions) {
       expect(
         directions(createSwipeDetector(false), [
@@ -147,7 +147,7 @@ describe('wrist swipes', () => {
     expect(directions(createSwipeDetector(false), both)).toEqual(['previous'])
   })
 
-  it('blocks return strokes and the other hand until lowered and cooldown has elapsed', () => {
+  it('blocks return strokes and re-arms after a pause without lowering the hand', () => {
     const detector = createSwipeDetector(false)
     const events: SwipeDirection[] = directions(detector, frames())
     events.push(
@@ -156,11 +156,11 @@ describe('wrist swipes', () => {
         [...path].reverse().map((x, i) => makeSwipeFrame(320 + i * 80, x)),
       ),
     )
-    // Even after 900ms, keeping the triggering hand up must not re-arm it.
+    // Holding still re-arms it even if the hand never moves down to the hips.
     for (let time = 640; time < 1520; time += 80)
       detector.push(makeSwipeFrame(time, -0.5))
-    expect(
-      directions(
+    events.push(
+      ...directions(
         detector,
         frames(1520, 16).map((frame) => {
           frame.landmarks[15] = makeSwipeFrame(
@@ -170,18 +170,54 @@ describe('wrist swipes', () => {
           return frame
         }),
       ),
-    ).toEqual([])
-    for (const time of [1840, 1920, 2000])
-      detector.push(makeSwipeFrame(time, -0.5, 15, 1))
-    events.push(...directions(detector, frames(2080)))
+    )
     expect(events).toEqual(['previous', 'previous'])
+  })
+
+  it('retains valid movement through one missed wrist or shoulder observation', () => {
+    for (const point of [11, 15]) {
+      const missing = makeSwipeFrame(180, 0.2)
+      missing.landmarks[point].visibility = 0.1
+      expect(
+        directions(createSwipeDetector(false), [
+          ...frames().slice(0, 3),
+          missing,
+          makeSwipeFrame(240, 0.4),
+        ]),
+      ).toEqual(['previous'])
+    }
+  })
+
+  it('does not join movement across a prolonged tracking loss', () => {
+    const missing = [240, 320, 400, 480].map((time) => {
+      const frame = makeSwipeFrame(time, 0.2)
+      frame.landmarks[15].visibility = 0
+      return frame
+    })
+    expect(
+      directions(createSwipeDetector(false), [
+        ...frames().slice(0, 3),
+        ...missing,
+        makeSwipeFrame(560, 0.4),
+      ]),
+    ).toEqual([])
+  })
+
+  it('does not re-arm during continuous back-and-forth motion', () => {
+    const detector = createSwipeDetector(false)
+    const events = directions(detector, frames())
+    for (let i = 0; i < 24; i++) {
+      const x = [0.1, -0.2, -0.5, -0.2, 0.1, 0.4][i % 6]
+      events.push(...directions(detector, [makeSwipeFrame(320 + i * 80, x)]))
+    }
+    expect(events).toEqual(['previous'])
   })
 
   it('requires the cooldown even when the hand is lowered immediately', () => {
     const detector = createSwipeDetector(false)
     directions(detector, frames())
     for (const time of [320, 400, 480])
-      detector.push(makeSwipeFrame(time, -0.5, 15, 1))
+      detector.push(makeSwipeFrame(time, -0.5, 15, 1.2))
     expect(directions(detector, frames(560))).toEqual([])
     for (const time of [880, 960, 1040])
       detector.push(makeSwipeFrame(time, -0.5))

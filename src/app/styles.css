@@ -273,6 +273,26 @@ h1 span {
 .mirror-toggle:has(input:disabled) {
   opacity: 0.5;
 }
+.pose-diagnostics {
+  position: absolute;
+  z-index: 3;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f4ffe9f2;
+  color: #263c30;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: left;
+}
+.pose-diagnostics summary {
+  cursor: pointer;
+}
+.pose-diagnostics p {
+  margin: 5px 0;
+}
 .garment-preview p {
   font-size: 10px;
   line-height: 1.6;
