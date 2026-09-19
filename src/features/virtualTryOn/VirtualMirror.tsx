@@ -4,14 +4,21 @@ import { createPoseChannel } from '../pose/poseChannel'
 import { startPoseSession } from '../pose/poseSession'
 import type { PoseState } from '../pose/poseSession'
 import { PoseOverlay } from '../pose/PoseOverlay'
+import { PoseDiagnostics } from '../pose/PoseDiagnostics'
 import { GarmentOverlay } from './GarmentOverlay'
-import { demoGarment } from '../wardrobe/garments'
+import type { Garment } from '../wardrobe/garments'
+import { SwipeGesture } from '../gesture/SwipeGesture'
+import type { SwipeDirection } from '../gesture/swipeDetector'
 
 interface Props {
   videoRef: RefObject<HTMLVideoElement | null>
   mirrored: boolean
   showSkeleton: boolean
   showGarment: boolean
+  garment: Garment
+  swipeEnabled: boolean
+  gestureResetKey: number
+  onSwipe: (direction: SwipeDirection) => void
 }
 
 export function VirtualMirror(props: Props) {
@@ -30,6 +37,10 @@ function MirrorSession({
   mirrored,
   showSkeleton,
   showGarment,
+  garment,
+  swipeEnabled,
+  gestureResetKey,
+  onSwipe,
   retry,
 }: Props & { retry: () => void }) {
   const [source] = useState(createPoseChannel)
@@ -48,13 +59,10 @@ function MirrorSession({
   return (
     <>
       {showGarment && (
-        <GarmentOverlay
-          source={source}
-          garment={demoGarment}
-          mirrored={mirrored}
-        />
+        <GarmentOverlay source={source} garment={garment} mirrored={mirrored} />
       )}
       {showSkeleton && <PoseOverlay source={source} />}
+      <PoseDiagnostics source={source} mirrored={mirrored} />
       <div className={`pose-hud ${mirrored ? 'is-mirrored' : ''}`}>
         <p role="status" className={`pose-message pose-${state}`}>
           {state === 'loading'
@@ -67,6 +75,14 @@ function MirrorSession({
                   ? '身体の一部を検出中'
                   : '身体を追跡中'}
         </p>
+        {showGarment && swipeEnabled && (
+          <SwipeGesture
+            source={source}
+            mirrored={mirrored}
+            resetKey={gestureResetKey}
+            onSwipe={onSwipe}
+          />
+        )}
         {state === 'error' && (
           <button className="pose-retry" onClick={retry}>
             姿勢推定を再試行

@@ -3,12 +3,15 @@ import { getDetectionState } from './poseGeometry'
 import type { PoseFrame } from './poseTypes'
 
 export interface PoseDetector {
+  readonly backend?: 'CPU' | 'GPU'
   detectForVideo(
     video: HTMLVideoElement,
     timestamp: number,
   ): { landmarks: PosePoint[][] }
   close(): void
 }
+
+export const POSE_TARGET_FPS = 30
 
 export type PoseState = 'loading' | DetectionState | 'error'
 
@@ -30,6 +33,7 @@ export function startPoseSession(
   let frame = 0
   let lastTime = -1
   let lastInference = -Infinity
+  let nextInference = 0
   let state: PoseState = 'loading'
   let hasFrame = false
   function report(next: PoseState) {
@@ -54,24 +58,32 @@ export function startPoseSession(
   function tick(timestamp: number) {
     if (stopped || !detector) return
     try {
-      // Keep the camera at its native rate, while inference runs at most 15 FPS.
+      // Process fresh frames only. Carry the fractional interval forward so
+      // rAF rounding doesn't turn a 30 FPS target into 20 FPS on 60 Hz displays.
       if (
         !document.hidden &&
         video.readyState >= 2 &&
         video.videoWidth > 0 &&
         video.videoHeight > 0 &&
         video.currentTime !== lastTime &&
-        timestamp - lastInference >= 1000 / 15
+        timestamp >= nextInference - 0.5
       ) {
         lastTime = video.currentTime
         lastInference = timestamp
+        const interval = 1000 / POSE_TARGET_FPS
+        nextInference = Math.max(nextInference + interval, timestamp)
+        if (nextInference <= timestamp) nextInference = timestamp + interval
+        const started = performance.now()
         const points =
           detector.detectForVideo(video, timestamp).landmarks[0] ?? []
+        const inferenceMs = performance.now() - started
         onFrame({
           landmarks: points,
           width: video.videoWidth,
           height: video.videoHeight,
           timestamp,
+          inferenceMs,
+          backend: detector.backend,
         })
         hasFrame = true
         report(getDetectionState(points))

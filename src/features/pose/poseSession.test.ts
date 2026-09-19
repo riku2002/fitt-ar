@@ -79,17 +79,20 @@ describe('shared pose session lifecycle', () => {
     callback?.(100)
     expect(detector.detectForVideo).toHaveBeenCalledExactlyOnceWith(video, 100)
     expect(skeleton.mock.lastCall?.[0]).toBe(garment.mock.lastCall?.[0])
-    expect(skeleton).toHaveBeenLastCalledWith({
-      landmarks: [],
-      width: 1280,
-      height: 720,
-      timestamp: 100,
-    })
+    expect(skeleton).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        landmarks: [],
+        width: 1280,
+        height: 720,
+        timestamp: 100,
+        inferenceMs: expect.any(Number),
+      }),
+    )
     callback?.(120) // Same decoded frame.
     video.currentTime = 0.1
-    callback?.(150) // Below 15 FPS interval.
+    callback?.(130) // Below the next 30 FPS slot.
     expect(detector.detectForVideo).toHaveBeenCalledOnce()
-    callback?.(210)
+    callback?.(140)
     expect(detector.detectForVideo).toHaveBeenCalledTimes(2)
     stop()
     callback?.(300)
@@ -98,6 +101,52 @@ describe('shared pose session lifecycle', () => {
     expect(detector.detectForVideo).toHaveBeenCalledTimes(2)
     expect(garment).toHaveBeenLastCalledWith(null)
     expect(cancelAnimationFrame).toHaveBeenCalled()
+  })
+  it.each([60, 90, 120])(
+    'keeps the 30 FPS target on a %i Hz display without rounding drift',
+    async (refreshRate) => {
+      const { video, detector, callbacks } = fixture()
+      const stop = startPoseSession(video, callbacks, async () => detector)
+      await flush()
+      for (let i = 0; i < refreshRate; i++) {
+        const timestamp = Math.round(((i * 1000) / refreshRate) * 10) / 10
+        video.currentTime = timestamp / 1000
+        callback?.(timestamp)
+      }
+      expect(detector.detectForVideo.mock.calls.length).toBeGreaterThanOrEqual(
+        29,
+      )
+      expect(detector.detectForVideo.mock.calls.length).toBeLessThanOrEqual(31)
+      stop()
+    },
+  )
+
+  it('reports measured inference duration and processes slow fresh frames without a backlog', async () => {
+    const { video, detector, callbacks } = fixture()
+    let clock = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    detector.detectForVideo.mockImplementation(() => {
+      clock += 18
+      return { landmarks: [] }
+    })
+    const stop = startPoseSession(video, callbacks, async () => ({
+      ...detector,
+      backend: 'GPU' as const,
+    }))
+    await flush()
+    for (let i = 0; i < 8; i++) {
+      video.currentTime = i / 8
+      callback?.(i * 125)
+    }
+    expect(detector.detectForVideo).toHaveBeenCalledTimes(8)
+    expect(callbacks.onFrame).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        inferenceMs: 18,
+        backend: 'GPU',
+        timestamp: 875,
+      }),
+    )
+    stop()
   })
   it('clears a stalled video and resumes with fresh frames', async () => {
     const { video, detector, callbacks } = fixture()
