@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CameraView } from './CameraView'
 import { startPoseSession } from '../pose/poseSession'
+import { makeSwipeFrame } from '../../test/swipeFixture'
 
 vi.mock('../pose/poseSession', () => ({
   startPoseSession: vi.fn(() => vi.fn()),
@@ -26,6 +27,10 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     clearRect: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    setTransform: vi.fn(),
+    drawImage: vi.fn(),
   } as unknown as CanvasRenderingContext2D)
   vi.stubGlobal(
     'Image',
@@ -44,6 +49,86 @@ afterEach(() => {
 })
 
 describe('CameraView', () => {
+  it('cycles all three garments with buttons and selects thumbnails without starting the camera', () => {
+    render(<CameraView />)
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '前の服' }))
+    expect(screen.getByText('3 / 3')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
+    )
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('switches once from shared wrist frames without restarting inference, and honors gesture OFF', async () => {
+    getUserMedia.mockResolvedValue(fakeStream().stream)
+    render(<CameraView />)
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+    await screen.findByRole('button', { name: 'カメラを停止' })
+    const publish = vi.mocked(startPoseSession).mock.calls[0][1].onFrame
+    act(() =>
+      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) =>
+        publish(makeSwipeFrame(i * 80, x)),
+      ),
+    )
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(screen.getByText(/← 次の服へ/)).toBeInTheDocument()
+    act(() =>
+      [0.4, 0.1, -0.2, -0.5].forEach((x, i) =>
+        publish(makeSwipeFrame(320 + i * 80, x)),
+      ),
+    )
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '手のスワイプで切り替え' }),
+    )
+    act(() =>
+      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) =>
+        publish(makeSwipeFrame(1600 + i * 80, x)),
+      ),
+    )
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(startPoseSession).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
+  })
+
+  it('clears partial swipes on manual selection and mirror changes', async () => {
+    getUserMedia.mockResolvedValue(fakeStream().stream)
+    render(<CameraView />)
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+    await screen.findByRole('button', { name: 'カメラを停止' })
+    const publish = vi.mocked(startPoseSession).mock.calls[0][1].onFrame
+    act(() =>
+      [-0.5, -0.2, 0.1].forEach((x, i) => publish(makeSwipeFrame(i * 80, x))),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
+    act(() => publish(makeSwipeFrame(240, 0.4)))
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    act(() =>
+      [-0.5, -0.2, 0.1].forEach((x, i) =>
+        publish(makeSwipeFrame(400 + i * 80, x)),
+      ),
+    )
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '鏡のように左右反転' }),
+    )
+    act(() => publish(makeSwipeFrame(640, 0.4)))
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    act(() =>
+      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) =>
+        publish(makeSwipeFrame(800 + i * 80, x)),
+      ),
+    )
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
   it('starts only on request, asks for video without audio, and releases on stop', async () => {
     const { stream, track } = fakeStream()
     getUserMedia.mockResolvedValue(stream)
