@@ -19,7 +19,7 @@ export function App() {
         <section className="intro" aria-labelledby="page-title">
           <p className="eyebrow">THE NEXT STEP</p>
           <h1 id="page-title">
-            Hello, <span>motion.</span>
+            Hello, <span>try-on.</span>
           </h1>
         </section>
         <CameraView />

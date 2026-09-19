@@ -43,7 +43,9 @@ export function normalizedToPixel(
 
 export type DetectionState = 'searching' | 'partial' | 'tracking'
 
-export function getDetectionState(points: PosePoint[]): DetectionState {
+export function getDetectionState(
+  points: readonly PosePoint[],
+): DetectionState {
   const count = BODY_POINTS.filter((index) => isVisible(points[index])).length
   return count === BODY_POINTS.length
     ? 'tracking'
@@ -54,7 +56,7 @@ export function getDetectionState(points: PosePoint[]): DetectionState {
 
 export function drawPose(
   context: CanvasRenderingContext2D,
-  points: PosePoint[],
+  points: readonly PosePoint[],
   width: number,
   height: number,
 ) {

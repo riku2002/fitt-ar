@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cameraErrorMessage, requestCamera, stopCamera } from './cameraService'
-import { PoseOverlay } from '../pose/PoseOverlay'
+import { VirtualMirror } from '../virtualTryOn/VirtualMirror'
+import { demoGarment } from '../wardrobe/garments'
 
 type CameraStatus = 'idle' | 'requesting' | 'playing' | 'error'
 
@@ -28,7 +29,8 @@ export function CameraView() {
   const [status, setStatus] = useState<CameraStatus>('idle')
   const [error, setError] = useState('')
   const [mirrored, setMirrored] = useState(true)
-  const [poseEnabled, setPoseEnabled] = useState(true)
+  const [showSkeleton, setShowSkeleton] = useState(false)
+  const [showGarment, setShowGarment] = useState(true)
   const [resolution, setResolution] = useState('')
 
   const release = useCallback(() => {
@@ -129,8 +131,13 @@ export function CameraView() {
               aria-label="カメラのライブ映像"
               className={isPlaying ? 'is-visible' : ''}
             />
-            {isPlaying && poseEnabled && (
-              <PoseOverlay videoRef={videoRef} mirrored={mirrored} />
+            {isPlaying && (showSkeleton || showGarment) && (
+              <VirtualMirror
+                videoRef={videoRef}
+                mirrored={mirrored}
+                showSkeleton={showSkeleton}
+                showGarment={showGarment}
+              />
             )}
           </div>
           {!isPlaying && (
@@ -166,11 +173,18 @@ export function CameraView() {
         </div>
       </div>
       <aside className="control-panel" aria-labelledby="setup-title">
-        <span className="step-number">02 / POSE TRACKING</span>
-        <h2 id="setup-title">身体の動きを映す</h2>
+        <span className="step-number">03 / VIRTUAL TRY-ON</span>
+        <h2 id="setup-title">一着を、重ねてみる</h2>
         <p className="control-copy">
-          肩・肘・手首・腰に重なる点と線が、あなたの動きに追従します。
+          肩と腰に合わせて、Tシャツがあなたの動きに追従します。
         </p>
+        <div className="garment-preview">
+          <img src={demoGarment.image} alt={`${demoGarment.name}の透過素材`} />
+          <div>
+            <strong>{demoGarment.name}</strong>
+            <p>布の質感と縫い目を残した、実写のTシャツ</p>
+          </div>
+        </div>
         <ol className="steps">
           <li>
             <span>1</span>
@@ -190,7 +204,7 @@ export function CameraView() {
             <span>3</span>
             <div>
               <strong>一歩下がって動いてみる</strong>
-              <p>肩から腰まで映して、腕を上げてみましょう。</p>
+              <p>正面を向いて肩と腰を映し、身体を傾けてみましょう。</p>
             </div>
           </li>
         </ol>
@@ -204,11 +218,20 @@ export function CameraView() {
           <span className="toggle-track" aria-hidden="true" />
         </label>
         <label className="mirror-toggle">
-          <span>姿勢推定・骨格表示</span>
+          <span>Tシャツを表示</span>
           <input
             type="checkbox"
-            checked={poseEnabled}
-            onChange={(event) => setPoseEnabled(event.target.checked)}
+            checked={showGarment}
+            onChange={(event) => setShowGarment(event.target.checked)}
+          />
+          <span className="toggle-track" aria-hidden="true" />
+        </label>
+        <label className="mirror-toggle">
+          <span>骨格を表示</span>
+          <input
+            type="checkbox"
+            checked={showSkeleton}
+            onChange={(event) => setShowSkeleton(event.target.checked)}
           />
           <span className="toggle-track" aria-hidden="true" />
         </label>

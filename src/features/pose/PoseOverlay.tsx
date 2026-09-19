@@ -1,77 +1,35 @@
-import { useEffect, useRef, useState } from 'react'
-import type { RefObject } from 'react'
-import { startPoseSession } from './poseSession'
-import type { PoseState } from './poseSession'
+import { useEffect, useRef } from 'react'
+import { drawPose } from './poseGeometry'
+import type { PoseSource } from './poseTypes'
 
-const messages: Record<PoseState, string> = {
-  loading: '姿勢推定を準備しています…',
-  searching: '肩から腰まで映る位置に立ってください',
-  partial: '一部を検出中 · 肩・手首・腰が映るように調整してください',
-  tracking: '肩・肘・手首・腰を追跡中',
-  error:
-    '姿勢推定を開始できませんでした。ページを再読み込みするか、再試行してください。',
-}
-
-export function PoseOverlay({
-  videoRef,
-  mirrored,
-}: {
-  videoRef: RefObject<HTMLVideoElement | null>
-  mirrored: boolean
-}) {
-  const [attempt, setAttempt] = useState(0)
-  return (
-    <PoseAttempt
-      key={attempt}
-      videoRef={videoRef}
-      mirrored={mirrored}
-      retry={() => setAttempt((value) => value + 1)}
-    />
-  )
-}
-
-function PoseAttempt({
-  videoRef,
-  mirrored,
-  retry,
-}: {
-  videoRef: RefObject<HTMLVideoElement | null>
-  mirrored: boolean
-  retry: () => void
-}) {
+/** Skeleton is a consumer of shared inference, never an owner of the model. */
+export function PoseOverlay({ source }: { source: PoseSource }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [state, setState] = useState<PoseState>('loading')
   useEffect(() => {
-    if (!videoRef.current || !canvasRef.current) return
-    return startPoseSession(
-      videoRef.current,
-      canvasRef.current,
-      setState,
-      async () => {
-        const { createPoseLandmarker } = await import('./poseLandmarker')
-        return createPoseLandmarker()
-      },
-    )
-  }, [videoRef])
-
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+    if (!canvas || !context) return
+    const unsubscribe = source.subscribe((frame) => {
+      if (!frame) {
+        context.clearRect(0, 0, canvas.width, canvas.height)
+        return
+      }
+      if (canvas.width !== frame.width || canvas.height !== frame.height) {
+        canvas.width = frame.width
+        canvas.height = frame.height
+      }
+      drawPose(context, frame.landmarks, frame.width, frame.height)
+    })
+    return () => {
+      unsubscribe()
+      context.clearRect(0, 0, canvas.width, canvas.height)
+    }
+  }, [source])
   return (
-    <>
-      <canvas
-        ref={canvasRef}
-        className="pose-canvas"
-        aria-label="肩・肘・手首・腰の骨格表示"
-      />
-      {/* Counter-reflect the message, while the canvas stays with the video. */}
-      <div className={`pose-hud ${mirrored ? 'is-mirrored' : ''}`}>
-        <p role="status" className={`pose-message pose-${state}`}>
-          {messages[state]}
-        </p>
-        {state === 'error' && (
-          <button className="pose-retry" onClick={retry}>
-            姿勢推定を再試行
-          </button>
-        )}
-      </div>
-    </>
+    <canvas
+      ref={canvasRef}
+      className="pose-canvas"
+      aria-label="肩・肘・手首・腰の骨格表示"
+    />
   )
 }
