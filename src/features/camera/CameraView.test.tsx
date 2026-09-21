@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CameraView } from './CameraView'
 import { startPoseSession } from '../pose/poseSession'
 import { makeSwipeFrame } from '../../test/swipeFixture'
+import * as wardrobe from '../wardrobe/garments'
 
 vi.mock('../pose/poseSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../pose/poseSession')>()),
@@ -52,6 +53,7 @@ afterEach(() => {
 describe('CameraView', () => {
   it('cycles all three garments with buttons and selects thumbnails without starting the camera', () => {
     render(<CameraView />)
+    expect(screen.getByRole('radio', { name: '全て' })).toBeChecked()
     expect(screen.getByText('1 / 3')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '前の服' }))
     expect(screen.getByText('3 / 3')).toBeInTheDocument()
@@ -65,6 +67,129 @@ describe('CameraView', () => {
       screen.getByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
     ).toHaveAttribute('aria-pressed', 'true')
     expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('filters thumbnails and buttons, keeping a matching selection or choosing the first match', () => {
+    render(<CameraView />)
+    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByText('男女共用')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Tシャツ / Redを選ぶ' }),
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '前の服' }))
+    expect(
+      screen.getByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
+    )
+    fireEvent.click(screen.getByRole('radio', { name: '全て' }))
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(screen.getByText('男性向け')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByText('男女共用')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
+    expect(screen.getByText('女性向け')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '全て' }))
+    expect(screen.getByText('3 / 3')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Tシャツ / Redを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('cycles only matching garments by swipe in both directions without changing category or restarting inference', async () => {
+    getUserMedia.mockResolvedValue(fakeStream().stream)
+    render(<CameraView />)
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+    await screen.findByRole('button', { name: 'カメラを停止' })
+    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
+    const publish = vi.mocked(startPoseSession).mock.calls[0][1].onFrame
+    const swipe = (time: number, xs: number[]) =>
+      act(() => {
+        publish(null)
+        // Hold before each new swipe to re-arm the existing cooldown detector.
+        if (time > 0) {
+          for (const offset of [-320, -240, -160, -80])
+            publish(makeSwipeFrame(time + offset, xs[0]))
+        }
+        xs.forEach((x, i) => publish(makeSwipeFrame(time + i * 80, x)))
+      })
+    swipe(0, [-0.5, -0.2, 0.1, 0.4])
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Tシャツ / Redを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      await screen.findByText('Tシャツ / Red · 試着中'),
+    ).toBeInTheDocument()
+    swipe(1600, [-0.5, -0.2, 0.1, 0.4])
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Tシャツ / Heather Gray · 試着中'),
+    ).toBeInTheDocument()
+    swipe(3200, [0.4, 0.1, -0.2, -0.5])
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '女性' })).toBeChecked()
+    expect(
+      screen.queryByRole('button', { name: 'Tシャツ / Mint Greenを選ぶ' }),
+    ).not.toBeInTheDocument()
+    expect(getUserMedia).toHaveBeenCalledOnce()
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('discards partial swipes when changing category', async () => {
+    getUserMedia.mockResolvedValue(fakeStream().stream)
+    render(<CameraView />)
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+    await screen.findByRole('button', { name: 'カメラを停止' })
+    const publish = vi.mocked(startPoseSession).mock.calls[0][1].onFrame
+    act(() =>
+      [-0.5, -0.2, 0.1].forEach((x, i) => publish(makeSwipeFrame(i * 80, x))),
+    )
+    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
+    act(() => publish(makeSwipeFrame(240, 0.4)))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    act(() =>
+      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) =>
+        publish(makeSwipeFrame(1600 + i * 80, x)),
+      ),
+    )
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('removes the previous overlay for an empty category and recovers without restarting inference', async () => {
+    const originalFilter = wardrobe.filterGarments
+    vi.spyOn(wardrobe, 'filterGarments').mockImplementation(
+      (catalog, filter) =>
+        filter === 'men' ? [] : originalFilter(catalog, filter),
+    )
+    getUserMedia.mockResolvedValue(fakeStream().stream)
+    render(<CameraView />)
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+    await screen.findByRole('button', { name: 'カメラを停止' })
+    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
+    expect(
+      screen.getByText(/このカテゴリの服はまだありません/),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('試着する服')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('checkbox', { name: '手のスワイプで切り替え' }),
+    ).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: '全て' }))
+    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+    expect(startPoseSession).toHaveBeenCalledOnce()
+    expect(getUserMedia).toHaveBeenCalledOnce()
   })
 
   it('switches once from shared wrist frames without restarting inference, and honors gesture OFF', async () => {

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cameraErrorMessage, requestCamera, stopCamera } from './cameraService'
 import { VirtualMirror } from '../virtualTryOn/VirtualMirror'
-import { garments } from '../wardrobe/garments'
+import { filterGarments, garments } from '../wardrobe/garments'
+import type { GarmentFilter } from '../wardrobe/garments'
 import { GarmentSelector } from '../wardrobe/GarmentSelector'
 import type { SwipeDirection } from '../gesture/swipeDetector'
 
@@ -34,20 +35,56 @@ export function CameraView() {
   const [showSkeleton, setShowSkeleton] = useState(false)
   const [showGarment, setShowGarment] = useState(true)
   const [resolution, setResolution] = useState('')
-  const [garmentIndex, setGarmentIndex] = useState(0)
+  const [garmentFilter, setGarmentFilter] = useState<GarmentFilter>('all')
+  const [garmentId, setGarmentId] = useState<string | null>(
+    garments[0]?.id ?? null,
+  )
+  const filteredGarments = useMemo(
+    () => filterGarments(garments, garmentFilter),
+    [garmentFilter],
+  )
+  const garmentIndex = Math.max(
+    0,
+    filteredGarments.findIndex((garment) => garment.id === garmentId),
+  )
+  const garment = filteredGarments[garmentIndex] ?? null
   const [swipeEnabled, setSwipeEnabled] = useState(true)
   const [gestureResetKey, setGestureResetKey] = useState(0)
-  const onSwipe = useCallback((direction: SwipeDirection) => {
-    setGarmentIndex(
-      (index) =>
-        (index + (direction === 'next' ? 1 : -1) + garments.length) %
-        garments.length,
+  const onSwipe = useCallback(
+    (direction: SwipeDirection) => {
+      setGarmentId((id) => {
+        if (!filteredGarments.length) return null
+        const index = Math.max(
+          0,
+          filteredGarments.findIndex((item) => item.id === id),
+        )
+        const next =
+          (index + (direction === 'next' ? 1 : -1) + filteredGarments.length) %
+          filteredGarments.length
+        return filteredGarments[next].id
+      })
+    },
+    [filteredGarments],
+  )
+  const selectGarment = useCallback(
+    (index: number) => {
+      setGarmentId(filteredGarments[index]?.id ?? null)
+      setGestureResetKey((key) => key + 1)
+    },
+    [filteredGarments],
+  )
+
+  function selectFilter(filter: GarmentFilter) {
+    const available = filterGarments(garments, filter)
+    setGarmentFilter(filter)
+    setGarmentId((id) =>
+      available.some((item) => item.id === id)
+        ? id
+        : (available[0]?.id ?? null),
     )
-  }, [])
-  const selectGarment = useCallback((index: number) => {
-    setGarmentIndex(index)
+    // Do not let a partially completed swipe select a garment in the new category.
     setGestureResetKey((key) => key + 1)
-  }, [])
+  }
 
   const release = useCallback(() => {
     requestId.current += 1
@@ -153,8 +190,8 @@ export function CameraView() {
                 mirrored={mirrored}
                 showSkeleton={showSkeleton}
                 showGarment={showGarment}
-                garment={garments[garmentIndex]}
-                swipeEnabled={swipeEnabled}
+                garment={garment}
+                swipeEnabled={swipeEnabled && filteredGarments.length > 1}
                 gestureResetKey={gestureResetKey}
                 onSwipe={onSwipe}
               />
@@ -219,11 +256,19 @@ export function CameraView() {
             許可画面が出ない場合は、アドレスバーのカメラ権限を確認してください。
           </p>
         )}
-        <GarmentSelector index={garmentIndex} onSelect={selectGarment} />
-        <p className="swipe-guide">
-          画面で 右 → 左：次の服
-          <br />左 → 右：前の服
-        </p>
+        <GarmentSelector
+          garments={filteredGarments}
+          index={garmentIndex}
+          filter={garmentFilter}
+          onFilterChange={selectFilter}
+          onSelect={selectGarment}
+        />
+        {filteredGarments.length > 1 && (
+          <p className="swipe-guide">
+            画面で 右 → 左：次の服
+            <br />左 → 右：前の服
+          </p>
+        )}
         <ol className="steps">
           <li>
             <span>1</span>
@@ -272,7 +317,7 @@ export function CameraView() {
           <input
             type="checkbox"
             checked={swipeEnabled}
-            disabled={!showGarment}
+            disabled={!showGarment || filteredGarments.length < 2}
             onChange={(event) => setSwipeEnabled(event.target.checked)}
           />
           <span className="toggle-track" aria-hidden="true" />
