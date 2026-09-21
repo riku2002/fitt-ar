@@ -15,7 +15,7 @@ interface Props {
   mirrored: boolean
   showSkeleton: boolean
   showGarment: boolean
-  garment: Garment
+  garment: Garment | null
   swipeEnabled: boolean
   gestureResetKey: number
   onSwipe: (direction: SwipeDirection) => void
@@ -58,7 +58,7 @@ function MirrorSession({
   }, [videoRef, source])
   return (
     <>
-      {showGarment && (
+      {showGarment && garment && (
         <GarmentOverlay source={source} garment={garment} mirrored={mirrored} />
       )}
       {showSkeleton && <PoseOverlay source={source} />}
@@ -75,7 +75,7 @@ function MirrorSession({
                   ? '身体の一部を検出中'
                   : '身体を追跡中'}
         </p>
-        {showGarment && swipeEnabled && (
+        {showGarment && garment && swipeEnabled && (
           <SwipeGesture
             source={source}
             mirrored={mirrored}

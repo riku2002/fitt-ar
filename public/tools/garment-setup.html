@@ -269,6 +269,17 @@
                 maxlength="80"
             /></label>
             <label
+              >服のカテゴリ
+              <select id="gender">
+                <option value="unisex">男女共用</option>
+                <option value="men">男性向け</option>
+                <option value="women">女性向け</option>
+              </select>
+            </label>
+            <p class="muted">
+              男女共用を選ぶと「男性」「女性」の両方に表示されます。「全て」にはどの服も表示されます。
+            </p>
+            <label
               >保存するファイル名
               <input
                 id="filename"
@@ -389,7 +400,7 @@
           id: filename.slice(0, -4),
           name,
           image: '',
-          gender: 'unisex',
+          gender: $('gender').value,
           category: 'tshirt',
           anchors,
           scaleX: 1,
@@ -489,6 +500,7 @@
           $('stage').hidden = false
           ready = true
           $('name').value = file ? '自分のTシャツ' : 'Tシャツ / Heather Gray'
+          $('gender').value = 'unisex'
           $('filename').value = file
             ? /^[a-z0-9][a-z0-9-]*\.png$/.test(file.name)
               ? file.name
@@ -520,6 +532,7 @@
       })
       for (const id of ['name', 'filename'])
         $(id).addEventListener('input', update)
+      $('gender').addEventListener('change', update)
       $('stage').addEventListener('click', (event) => {
         const rect = $('photo').getBoundingClientRect()
         place(

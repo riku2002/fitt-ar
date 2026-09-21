@@ -191,6 +191,70 @@ h1 span {
   text-align: center;
   z-index: 2;
 }
+.garment-filter {
+  min-width: 0;
+  margin: 22px 0 0;
+  padding: 0;
+  border: 0;
+}
+.garment-filter legend {
+  margin-bottom: 10px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.garment-filter-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #d9ded5;
+  border-radius: 10px;
+  background: #e9ede3;
+}
+.garment-filter-options label {
+  position: relative;
+  cursor: pointer;
+}
+.garment-filter-options input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.garment-filter-options span {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  border-radius: 7px;
+  color: #52624d;
+  font-size: 12px;
+}
+.garment-filter-options input:checked + span {
+  background: #253d32;
+  color: #fff;
+  font-weight: 600;
+}
+.garment-filter-options input:focus-visible + span {
+  outline: 3px solid #47856b;
+  outline-offset: 2px;
+}
+.garment-filter-hint {
+  margin: 8px 0 0;
+  color: #667068;
+  font-size: 10px;
+  line-height: 1.7;
+}
+.garment-empty {
+  padding: 16px;
+  border: 1px solid #d9ded5;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.8;
+}
 .garment-preview {
   display: flex;
   align-items: center;
@@ -219,6 +283,15 @@ h1 span {
   letter-spacing: 2px;
   margin-bottom: 6px;
 }
+.garment-gender {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #dfe7d7;
+  color: #45573e;
+  font-size: 10px;
+}
 .wardrobe-buttons {
   display: flex;
   gap: 8px;
@@ -232,6 +305,10 @@ h1 span {
   background: #fff;
   color: #253d32;
   font-size: 12px;
+}
+.wardrobe-buttons button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .garment-thumbnails {
   display: grid;
