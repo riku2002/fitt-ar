@@ -41,9 +41,6 @@ export function GarmentSelector({
             </label>
           ))}
         </div>
-        <p id={`${groupId}-hint`} className="garment-filter-hint">
-          共用の服は、男性・女性の両方に表示します。
-        </p>
       </fieldset>
       {garment ? (
         <>

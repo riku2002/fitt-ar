@@ -230,11 +230,6 @@ export function CameraView() {
         </div>
       </div>
       <aside className="control-panel" aria-labelledby="setup-title">
-        <span className="step-number">04 / SWIPE TO TRY</span>
-        <h2 id="setup-title">手を動かして、次の一着へ</h2>
-        <p className="control-copy">
-          胸の高さで片手を横に動かすと、服が切り替わります。
-        </p>
         {isPlaying || isRequesting ? (
           <button className="primary-button stop-button" onClick={stop}>
             {isRequesting ? '接続をキャンセル' : 'カメラを停止'}
