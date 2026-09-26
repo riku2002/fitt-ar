@@ -1,9 +1,7 @@
-export interface PosePoint {
-  x: number
-  y: number
-  visibility: number
-  presence?: number
-}
+import type { PosePoint, PosePoint2D } from './poseTypes'
+
+// Keep existing type imports working, including poseSession.ts.
+export type { PosePoint, PosePoint2D } from './poseTypes'
 
 export const BODY_POINTS = [11, 12, 13, 14, 15, 16, 23, 24] as const
 export const BODY_CONNECTIONS = [
@@ -17,7 +15,10 @@ export const BODY_CONNECTIONS = [
   [23, 24],
 ] as const
 
-export function isVisible(point: PosePoint | undefined): point is PosePoint {
+/** Check only 2D information, preserving the caller's complete point type. */
+export function isVisible<T extends PosePoint2D>(
+  point: T | undefined,
+): point is T {
   return (
     !!point &&
     Number.isFinite(point.x) &&
@@ -26,15 +27,20 @@ export function isVisible(point: PosePoint | undefined): point is PosePoint {
     point.x <= 1 &&
     point.y >= 0 &&
     point.y <= 1 &&
+    Number.isFinite(point.visibility) &&
     point.visibility >= 0.5 &&
-    (point.presence ?? 1) >= 0.5
+    point.visibility <= 1 &&
+    (point.presence === undefined ||
+      (Number.isFinite(point.presence) &&
+        point.presence >= 0.5 &&
+        point.presence <= 1))
   )
 }
 
 // Canvas uses the video's intrinsic size. CSS object-fit: contain and the
 // shared parent transform handle letterboxing and mirroring for BOTH layers.
 export function normalizedToPixel(
-  point: PosePoint,
+  point: Pick<PosePoint, 'x' | 'y'>,
   width: number,
   height: number,
 ) {
@@ -44,7 +50,7 @@ export function normalizedToPixel(
 export type DetectionState = 'searching' | 'partial' | 'tracking'
 
 export function getDetectionState(
-  points: readonly PosePoint[],
+  points: readonly PosePoint2D[],
 ): DetectionState {
   const count = BODY_POINTS.filter((index) => isVisible(points[index])).length
   return count === BODY_POINTS.length
@@ -56,7 +62,7 @@ export function getDetectionState(
 
 export function drawPose(
   context: CanvasRenderingContext2D,
-  points: readonly PosePoint[],
+  points: readonly PosePoint2D[],
   width: number,
   height: number,
 ) {
