@@ -6,6 +6,21 @@ import { startPoseSession } from '../pose/poseSession'
 import { makeSwipeFrame } from '../../test/swipeFixture'
 import * as wardrobe from '../wardrobe/garments'
 
+
+// A stable three-product fixture for camera/gesture behavior; the real
+// five-product catalog is covered by garments.test.ts and switching tests.
+vi.mock('../wardrobe/garments', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../wardrobe/garments')>()
+  return {
+    ...original,
+    garments: [
+      { ...original.demoGarment, id: 'tshirt-gray', name: 'Tシャツ / Heather Gray', gender: 'unisex' as const },
+      { ...original.demoGarment, id: 'tshirt-mint', name: 'Tシャツ / Mint Green', gender: 'men' as const },
+      { ...original.demoGarment, id: 'tshirt-red', name: 'Tシャツ / Red', gender: 'women' as const },
+    ],
+  }
+})
+
 vi.mock('../pose/poseSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../pose/poseSession')>()),
   startPoseSession: vi.fn(() => vi.fn()),

@@ -50,11 +50,20 @@ docs/
   swipe-reliability.md
 public/
   garments/
+    dress_icon.png
+    dress.glb
+    pants_icon.png
+    pants.glb
     README.md
+    skirt_icon.png
+    skirt.glb
     tshirt-gray.png
     tshirt-mint.png
     tshirt-red.png
-    tshirt.glb
+    tshirt1_icon.png
+    tshirt1.glb
+    tshirt2_icon.png
+    tshirt2.glb
   models/
     MEDIAPIPE-LICENSE.txt
     pose_landmarker_lite.task
@@ -92,6 +101,7 @@ src/
       poseSession.ts
       poseTypes.ts
     virtualTryOn/
+      GarmentOverlay.switching.test.tsx
       GarmentOverlay.test.tsx
       GarmentOverlay.tsx
       garmentRenderer.ts
@@ -128,207 +138,292 @@ vite.config.ts
 <files>
 This section contains the contents of the repository's files.
 
-<file path="test-log.txt">
-> fitt-ar@0.1.0 test
-> vitest run
+<file path="src/features/virtualTryOn/GarmentOverlay.switching.test.tsx">
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
+import * as THREE from 'three'
+import { clone } from 'three/addons/utils/SkeletonUtils.js'
+import { GarmentOverlay } from './GarmentOverlay'
+import { CameraView } from '../camera/CameraView'
+import { startPoseSession } from '../pose/poseSession'
+import { createPoseChannel } from '../pose/poseChannel'
+import { DEFAULT_GARMENT_MODEL_URL, demoGarment, garments } from '../wardrobe/garments'
+import type { Garment } from '../wardrobe/garments'
+import { makeSwipeFrame } from '../../test/swipeFixture'
 
+const harness = vi.hoisted(() => ({
+  load: vi.fn(),
+  clear: vi.fn(),
+  canvasMount: vi.fn(),
+  canvasUnmount: vi.fn(),
+}))
 
-[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90mC:/Users/user/riku/fitt-ar[39m
+// Test the actual selection/loading/lifecycle logic without a WebGL renderer.
+vi.mock('@react-three/fiber', async () => {
+  const { createElement, Fragment, useEffect } = await import('react')
+  return {
+    Canvas: function CanvasDouble({ children }: { children: ReactNode }) {
+      useEffect(() => {
+        harness.canvasMount()
+        return () => { harness.canvasUnmount() }
+      }, [])
+      return createElement(Fragment, null, children)
+    },
+    useFrame: vi.fn(),
+  }
+})
+vi.mock('@react-three/drei', () => ({
+  useGLTF: Object.assign(harness.load, { clear: harness.clear }),
+}))
+vi.mock('three/addons/utils/SkeletonUtils.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
+  return { ...original, clone: vi.fn(original.clone) }
+})
+vi.mock('../pose/poseSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../pose/poseSession')>()),
+  startPoseSession: vi.fn(() => vi.fn()),
+}))
+vi.mock('../wardrobe/garments', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../wardrobe/garments')>()
 
- [32m笨・[39m src/features/pose/poseSession.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 41[2mms[22m[39m
- [32m笨・[39m src/features/gesture/swipeDetector.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 37[2mms[22m[39m
- [32m笨・[39m src/features/gesture/swipeReplay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 44[2mms[22m[39m
- [32m笨・[39m src/features/pose/PoseDiagnostics.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 148[2mms[22m[39m
-node.exe : [90mstderr[2m | src/features/virtualTryO
-n/GarmentOverlay.test.tsx[2m > [22m[2mstarts hidde
-n, waits for fresh stable samples, and respects conta
-in bars
-発生場所 行:1 文字:1
-+ & "C:\Program Files\nodejs/node.exe" "C:\Program Fi
-les\nodejs/node_mo ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: ([90mst 
-   derr[2m...ts contain bars:String) [], RemoteExc  
-  eption
-    + FullyQualifiedErrorId : NativeCommandError
- 
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-The tag <ambientLight> is unrecognized in this browse
-r. If you meant to render a React component, start it
-s name with an uppercase letter.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-The tag <directionalLight> is unrecognized in this br
-owser. If you meant to render a React component, star
-t its name with an uppercase letter.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-The tag <primitive> is unrecognized in this browser. 
-If you meant to render a React component, start its n
-ame with an uppercase letter.
+  return {
+    ...original,
+    // Keep named exports explicit so GarmentOverlay can import the default GLB
+    // constant from this mocked module without Vitest reporting a missing export.
+    DEFAULT_GARMENT_MODEL_URL: original.DEFAULT_GARMENT_MODEL_URL,
+    demoGarment: original.demoGarment,
+    filterGarments: original.filterGarments,
+    garmentGenderLabels: original.garmentGenderLabels,
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"visibility":0.49}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+    // Distinct, mocked GLB assets; no claim that these files exist on disk.
+    garments: original.garments.map((garment) => ({
+      ...garment,
+      modelUrl: `/switch-fixture/${garment.id}.glb`,
+    })),
+  }
+})
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"presence":0.49}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+type Resource =
+  | { kind: 'ready'; scene: THREE.Group }
+  | { kind: 'pending'; promise: Promise<void> }
+  | { kind: 'error'; error: Error }
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"visibility":null}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+const resources = new Map<string, Resource>()
+const fixtures: THREE.Mesh[] = []
+let now = 1000
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"z":null}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+function ready(url: string) {
+  const scene = new THREE.Group()
+  scene.name = url
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 1.7, 0.2),
+    new THREE.MeshStandardMaterial(),
+  )
+  mesh.name = 'SwitchFixtureCloth'
+  fixtures.push(mesh)
+  const left = new THREE.Object3D()
+  const right = new THREE.Object3D()
+  left.name = 'AR_LeftShoulder'
+  right.name = 'AR_RightShoulder'
+  left.position.set(0.5, 0.7, 0)
+  right.position.set(-0.5, 0.7, 0)
+  scene.add(mesh, left, right)
+  resources.set(url, { kind: 'ready', scene })
+  return scene
+}
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+function pending(url: string) {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  resources.set(url, { kind: 'pending', promise })
+  return () => {
+    ready(url)
+    resolve()
+  }
+}
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"x":1.1}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+function garment(id: string, modelUrl: string): Garment {
+  return { ...demoGarment, id, name: `Fixture ${id}`, modelUrl }
+}
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2muses different hide/sho
-w thresholds to avoid rapid visibility toggles
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+function latestAsset(): THREE.Object3D {
+  const result = vi.mocked(clone).mock.results.at(-1)
+  if (!result || result.type !== 'return') throw new Error('No cloned GLB')
+  return result.value
+}
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mrejects a depth-dominat
-ed shoulder vector even when its image width is large
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+function localMaterial(asset: THREE.Object3D): THREE.Material {
+  const mesh = asset.getObjectByName('SwitchFixtureCloth')
+  if (!(mesh instanceof THREE.Mesh) || Array.isArray(mesh.material)) {
+    throw new Error('Missing fixture material')
+  }
+  return mesh.material
+}
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mpreserves depth sign an
-d computes roll using video pixels
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+beforeEach(() => {
+  now = 1000
+  vi.useFakeTimers()
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  harness.load.mockReset().mockImplementation((url: string) => {
+    const resource = resources.get(url)
+    if (!resource) throw new Error(`Missing fixture: ${url}`)
+    if (resource.kind === 'pending') throw resource.promise
+    if (resource.kind === 'error') throw resource.error
+    return { scene: resource.scene }
+  })
+  harness.clear.mockReset()
+  harness.canvasMount.mockClear()
+  harness.canvasUnmount.mockClear()
+  vi.mocked(clone).mockClear()
+  vi.mocked(startPoseSession).mockClear()
+  ready(DEFAULT_GARMENT_MODEL_URL)
+})
 
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mclears null/stalled pos
-es, and never mirrors coordinates a second time
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
+afterEach(() => {
+  cleanup()
+  for (const mesh of fixtures) {
+    mesh.geometry.dispose()
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    materials.forEach((material) => material.dispose())
+  }
+  fixtures.length = 0
+  resources.clear()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 
- [32m笨・[39m src/features/virtualTryOn/GarmentOverlay.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 395[2mms[22m[39m
- [32m笨・[39m src/features/wardrobe/GarmentSelector.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[33m 720[2mms[22m[39m
-   [32m笨・[39m GarmentSelector [2m(2)[22m
-     [33m[2m笨・[22m[39m keeps category selection available when no garments match[33m 626[2mms[22m[39m
- [32m笨・[39m src/features/pose/poseChannel.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
- [32m笨・[39m src/features/virtualTryOn/garmentTransform.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 20[2mms[22m[39m
- [32m笨・[39m src/features/pose/poseLandmarker.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 24[2mms[22m[39m
- [32m笨・[39m src/features/pose/poseGeometry.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 22[2mms[22m[39m
- [32m笨・[39m src/features/wardrobe/garments.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 12[2mms[22m[39m
- [32m笨・[39m src/features/camera/CameraView.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[33m 5237[2mms[22m[39m
-   [32m笨・[39m CameraView [2m(20)[22m
-     [33m[2m笨・[22m[39m cycles all three garments with buttons and selects thumbnails without starting the camera[33m 1269[2mms[22m[39m
-     [33m[2m笨・[22m[39m filters thumbnails and buttons, keeping a matching selection or choosing the first match[33m 662[2mms[22m[39m
-     [33m[2m笨・[22m[39m cycles only matching garments by swipe in both directions without changing category or restarting inference[33m 431[2mms[22m[39m
-     [33m[2m笨・[22m[39m removes the previous overlay for an empty category and recovers without restarting inference[33m 385[2mms[22m[39m
-     [33m[2m笨・[22m[39m switches once from shared wrist frames without restarting inference, and honors gesture OFF[33m 306[2mms[22m[39m
-     [33m[2m笨・[22m[39m clears partial swipes on manual selection and mirror changes[33m 385[2mms[22m[39m
-     [33m[2m笨・[22m[39m starts only on request, asks for video without audio, and releases on stop[33m 403[2mms[22m[39m
+it('loads the selected URL, disposes the old instance, and preserves Canvas and the pose subscription', () => {
+  const a = garment('a', '/switch-fixture/a.glb')
+  const b = garment('b', '/switch-fixture/b.glb')
+  const cachedA = ready(a.modelUrl!)
+  ready(b.modelUrl!)
+  const cachedMaterial = localMaterial(cachedA)
+  const sharedDispose = vi.spyOn(cachedMaterial, 'dispose')
+  const source = createPoseChannel()
+  const subscribe = vi.spyOn(source, 'subscribe')
+  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
+  const oldAsset = latestAsset()
+  const dispose = vi.spyOn(localMaterial(oldAsset), 'dispose')
 
-[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
-[2m      Tests [22m [1m[32m95 passed[39m[22m[90m (95)[39m
-[2m   Start at [22m 20:16:32
-[2m   Duration [22m 12.65s[2m (environment 70%, setup 14%, tests 10%, transform 5%, import 1%)[22m
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
 
-[2mEnvironment [22m [33mjsdom was created 12 times[39m[2m ﾂｷ 48.24s total, 70% of tracked time[22m
-[2m            [22m [2mcreate it once per worker with [22m[33mpool: 'vmThreads'[39m[2m (keeps per-file isolation) or [22m[33misolate: false[39m[2m (shares it across files)[22m
-[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-environments[22m
+  expect(harness.load).toHaveBeenLastCalledWith(b.modelUrl)
+  expect(latestAsset().name).toBe(b.modelUrl)
+  expect(latestAsset()).not.toBe(oldAsset)
+  expect(dispose).toHaveBeenCalledOnce()
+  expect(sharedDispose).not.toHaveBeenCalled()
+  expect(cachedA.parent).toBeNull()
+  expect(subscribe).toHaveBeenCalledOnce()
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+  expect(harness.canvasUnmount).not.toHaveBeenCalled()
+  expect(harness.clear).not.toHaveBeenCalled()
+})
+
+it('reloads the selected instance when its URL changes without changing garment id', () => {
+  const a = garment('same-id', '/switch-fixture/a.glb')
+  const b = garment('same-id', '/switch-fixture/b.glb')
+  ready(a.modelUrl!)
+  ready(b.modelUrl!)
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
+  const first = latestAsset()
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+  expect(latestAsset()).not.toBe(first)
+  expect(latestAsset().name).toBe(b.modelUrl)
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+
+it('does not resurrect a slow previous selection after a newer GLB has loaded', async () => {
+  const a = garment('a', '/switch-fixture/a.glb')
+  const b = garment('b', '/switch-fixture/b.glb')
+  const c = garment('c', '/switch-fixture/c.glb')
+  ready(a.modelUrl!)
+  const finishB = pending(b.modelUrl!)
+  ready(c.modelUrl!)
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+  expect(screen.getByText('3Dモデルを読み込んでいます…')).toBeInTheDocument()
+  view.rerender(<GarmentOverlay source={source} garment={c} mirrored />)
+  const latest = latestAsset()
+  await act(async () => { finishB() })
+  expect(latestAsset()).toBe(latest)
+  expect(latest.name).toBe(c.modelUrl)
+  expect(screen.queryByText('3Dモデルを読み込んでいます…')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-url', c.modelUrl)
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+
+it('can select another GLB after a load error without recreating Canvas', () => {
+  const initial = garment('initial', '/switch-fixture/initial.glb')
+  ready(initial.modelUrl!)
+  const a = garment('broken', '/switch-fixture/broken.glb')
+  const b = garment('good', '/switch-fixture/good.glb')
+  resources.set(a.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
+  ready(b.modelUrl!)
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={initial} mirrored />)
+  view.rerender(<GarmentOverlay source={source} garment={a} mirrored />)
+  expect(screen.getByRole('button', { name: '3Dモデルを再読み込み' })).toBeInTheDocument()
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+  expect(latestAsset().name).toBe(b.modelUrl)
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+
+it('retries only the selected failed URL, not the default or other cached GLBs', () => {
+  const selected = garment('broken', '/switch-fixture/broken.glb')
+  resources.set(selected.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
+  harness.clear.mockImplementation((url: string) => { ready(url) })
+  const source = createPoseChannel()
+  render(<GarmentOverlay source={source} garment={selected} mirrored />)
+  fireEvent.click(screen.getByRole('button', { name: '3Dモデルを再読み込み' }))
+  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(selected.modelUrl)
+  expect(latestAsset().name).toBe(selected.modelUrl)
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+})
+
+it('keeps legacy 2D fixtures usable without a modelUrl property', () => {
+  const legacy = { ...demoGarment, modelUrl: undefined }
+  render(<GarmentOverlay source={createPoseChannel()} garment={legacy} mirrored />)
+  expect(harness.load).toHaveBeenLastCalledWith(DEFAULT_GARMENT_MODEL_URL)
+})
+
+it('routes a real wrist swipe through CameraView to another GLB without restarting inference', async () => {
+  for (const item of garments) ready(item.modelUrl!)
+  const stop = vi.fn()
+  const track = { stop, onended: null as (() => void) | null }
+  const stream = {
+    getTracks: () => [track],
+    getVideoTracks: () => [track],
+  } as unknown as MediaStream
+  const getUserMedia = vi.fn().mockResolvedValue(stream)
+  vi.stubGlobal('isSecureContext', true)
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  render(<CameraView />)
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+  })
+  expect(startPoseSession).toHaveBeenCalledOnce()
+  const call = vi.mocked(startPoseSession).mock.calls[0]
+  if (!call) throw new Error('Pose session did not start')
+  const publish = call[1].onFrame
+  act(() => {
+    for (const x of [-0.5, -0.2, 0.1, 0.4]) {
+      now += 80
+      publish(makeSwipeFrame(now, x))
+    }
+  })
+  expect(screen.getByText('2 / 3')).toBeInTheDocument()
+  expect(harness.load).toHaveBeenLastCalledWith(garments[1].modelUrl)
+  expect(latestAsset().name).toBe(garments[1].modelUrl)
+  expect(startPoseSession).toHaveBeenCalledOnce()
+  expect(getUserMedia).toHaveBeenCalledOnce()
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
 </file>
 
 <file path=".github/workflows/ci.yml">
@@ -1268,7 +1363,12 @@ export function calculateGarmentTransform(
 
 <file path="src/features/wardrobe/garments.test.ts">
 import { describe, expect, it } from 'vitest'
-import { demoGarment, filterGarments } from './garments'
+import {
+  DEFAULT_GARMENT_MODEL_URL,
+  demoGarment,
+  filterGarments,
+  garments,
+} from './garments'
 import type { Garment, GarmentFilter } from './garments'
 
 const catalog: readonly Garment[] = [
@@ -1277,6 +1377,20 @@ const catalog: readonly Garment[] = [
   { ...demoGarment, id: 'men-1', gender: 'men' },
   { ...demoGarment, id: 'women-2', gender: 'women' },
 ]
+
+describe('garment catalog', () => {
+  it('exports the default GLB URL and gives catalog garments a model URL', () => {
+    expect(DEFAULT_GARMENT_MODEL_URL).toBe(
+      `${import.meta.env.BASE_URL}garments/tshirt.glb`,
+    )
+
+    expect(demoGarment.modelUrl).toBe(DEFAULT_GARMENT_MODEL_URL)
+
+    for (const garment of garments) {
+      expect(garment.modelUrl).toBeTruthy()
+    }
+  })
+})
 
 describe('filterGarments', () => {
   it.each<[GarmentFilter, string[]]>([
@@ -1289,6 +1403,7 @@ describe('filterGarments', () => {
       expect(
         filterGarments(catalog, filter).map((garment) => garment.id),
       ).toEqual(expected)
+
       expect(catalog.map((garment) => garment.id)).toEqual([
         'women-1',
         'shared',
@@ -1359,93 +1474,6 @@ describe('GarmentSelector', () => {
 })
 </file>
 
-<file path="src/test/poseFixture.ts">
-import type { PoseFrame, PosePoint } from '../features/pose/poseTypes'
-
-export function makePoseFrame(): PoseFrame {
-  const landmarks: PosePoint[] = Array.from({ length: 33 }, () => ({
-    x: 0,
-    y: 0,
-    z: 0,
-    visibility: 0,
-  }))
-  landmarks[11] = { x: 0.625, y: 0.25, z: 0, visibility: 1 }
-  landmarks[12] = { x: 0.375, y: 0.25, z: 0, visibility: 1 }
-  landmarks[23] = { x: 0.625, y: 0.75, z: 0, visibility: 1 }
-  landmarks[24] = { x: 0.375, y: 0.75, z: 0, visibility: 1 }
-  return { width: 1280, height: 720, timestamp: 100, landmarks }
-}
-</file>
-
-<file path="src/test/setup.ts">
-import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
-
-/**
- * jsdom does not provide ResizeObserver.
- *
- * react-use-measure (used internally by @react-three/fiber) expects it to
- * exist, even though unit/integration tests do not need real layout
- * observation.
- *
- * Do not install this through vi.stubGlobal(), because individual test files
- * may call vi.unstubAllGlobals() in afterEach().
- */
-class ResizeObserverMock implements ResizeObserver {
-  constructor(_callback: ResizeObserverCallback) {}
-
-  observe(_target: Element, _options?: ResizeObserverOptions): void {}
-
-  unobserve(_target: Element): void {}
-
-  disconnect(): void {}
-}
-
-if (typeof globalThis.ResizeObserver === 'undefined') {
-  Object.defineProperty(globalThis, 'ResizeObserver', {
-    configurable: true,
-    writable: true,
-    value: ResizeObserverMock,
-  })
-}
-
-if (
-  typeof window !== 'undefined' &&
-  typeof window.ResizeObserver === 'undefined'
-) {
-  Object.defineProperty(window, 'ResizeObserver', {
-    configurable: true,
-    writable: true,
-    value: ResizeObserverMock,
-  })
-}
-
-afterEach(cleanup)
-</file>
-
-<file path="src/test/swipeFixture.ts">
-import { makePoseFrame } from './poseFixture'
-
-// A front-facing torso: 320px shoulders, shoulders at y=180, hips at y=540.
-export function makeSwipeFrame(
-  timestamp: number,
-  x: number,
-  hand: 15 | 16 = 15,
-  y = 0.35,
-) {
-  const frame = makePoseFrame()
-  const landmarks = [...frame.landmarks]
-  landmarks[hand] = {
-    x: (640 + x * 320) / 1280,
-    y: (180 + y * 320) / 720,
-    z: 0,
-    visibility: 1,
-  }
-  return { ...frame, timestamp, landmarks }
-}
-</file>
-
 <file path="src/main.tsx">
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -1478,6 +1506,209 @@ engine-strict=true
   "semi": false,
   "trailingComma": "all"
 }
+</file>
+
+<file path="test-log.txt">
+> fitt-ar@0.1.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90mC:/Users/user/riku/fitt-ar[39m
+
+ [32m笨・[39m src/features/pose/poseSession.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m笨・[39m src/features/gesture/swipeDetector.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m笨・[39m src/features/gesture/swipeReplay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+ [32m笨・[39m src/features/pose/PoseDiagnostics.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 148[2mms[22m[39m
+node.exe : [90mstderr[2m | src/features/virtualTryO
+n/GarmentOverlay.test.tsx[2m > [22m[2mstarts hidde
+n, waits for fresh stable samples, and respects conta
+in bars
+発生場所 行:1 文字:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Fi
+les\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([90mst 
+   derr[2m...ts contain bars:String) [], RemoteExc  
+  eption
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+The tag <ambientLight> is unrecognized in this browse
+r. If you meant to render a React component, start it
+s name with an uppercase letter.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+The tag <directionalLight> is unrecognized in this br
+owser. If you meant to render a React component, star
+t its name with an uppercase letter.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+The tag <primitive> is unrecognized in this browser. 
+If you meant to render a React component, start its n
+ame with an uppercase letter.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mhides instead of applyi
+ng invalid shoulder data: {"visibility":0.49}
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mhides instead of applyi
+ng invalid shoulder data: {"presence":0.49}
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mhides instead of applyi
+ng invalid shoulder data: {"visibility":null}
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mhides instead of applyi
+ng invalid shoulder data: {"z":null}
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mhides instead of applyi
+ng invalid shoulder data: {}
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mhides instead of applyi
+ng invalid shoulder data: {"x":1.1}
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2muses different hide/sho
+w thresholds to avoid rapid visibility toggles
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mrejects a depth-dominat
+ed shoulder vector even when its image width is large
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mpreserves depth sign an
+d computes roll using video pixels
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+[90mstderr[2m | src/features/virtualTryOn/GarmentOv
+erlay.test.tsx[2m > [22m[2mclears null/stalled pos
+es, and never mirrors coordinates a second time
+[22m[39m<ambientLight /> is using incorrect casing.
+ Use PascalCase for React components, or lowercase fo
+r HTML elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+<directionalLight /> is using incorrect casing. Use P
+ascalCase for React components, or lowercase for HTML
+ elements.
+
+ [32m笨・[39m src/features/virtualTryOn/GarmentOverlay.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 395[2mms[22m[39m
+ [32m笨・[39m src/features/wardrobe/GarmentSelector.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[33m 720[2mms[22m[39m
+   [32m笨・[39m GarmentSelector [2m(2)[22m
+     [33m[2m笨・[22m[39m keeps category selection available when no garments match[33m 626[2mms[22m[39m
+ [32m笨・[39m src/features/pose/poseChannel.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m笨・[39m src/features/virtualTryOn/garmentTransform.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m笨・[39m src/features/pose/poseLandmarker.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m笨・[39m src/features/pose/poseGeometry.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m笨・[39m src/features/wardrobe/garments.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m笨・[39m src/features/camera/CameraView.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[33m 5237[2mms[22m[39m
+   [32m笨・[39m CameraView [2m(20)[22m
+     [33m[2m笨・[22m[39m cycles all three garments with buttons and selects thumbnails without starting the camera[33m 1269[2mms[22m[39m
+     [33m[2m笨・[22m[39m filters thumbnails and buttons, keeping a matching selection or choosing the first match[33m 662[2mms[22m[39m
+     [33m[2m笨・[22m[39m cycles only matching garments by swipe in both directions without changing category or restarting inference[33m 431[2mms[22m[39m
+     [33m[2m笨・[22m[39m removes the previous overlay for an empty category and recovers without restarting inference[33m 385[2mms[22m[39m
+     [33m[2m笨・[22m[39m switches once from shared wrist frames without restarting inference, and honors gesture OFF[33m 306[2mms[22m[39m
+     [33m[2m笨・[22m[39m clears partial swipes on manual selection and mirror changes[33m 385[2mms[22m[39m
+     [33m[2m笨・[22m[39m starts only on request, asks for video without audio, and releases on stop[33m 403[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
+[2m      Tests [22m [1m[32m95 passed[39m[22m[90m (95)[39m
+[2m   Start at [22m 20:16:32
+[2m   Duration [22m 12.65s[2m (environment 70%, setup 14%, tests 10%, transform 5%, import 1%)[22m
+
+[2mEnvironment [22m [33mjsdom was created 12 times[39m[2m ﾂｷ 48.24s total, 70% of tracked time[22m
+[2m            [22m [2mcreate it once per worker with [22m[33mpool: 'vmThreads'[39m[2m (keeps per-file isolation) or [22m[33misolate: false[39m[2m (shares it across files)[22m
+[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-environments[22m
 </file>
 
 <file path="tsconfig.app.json">
@@ -2013,105 +2244,6 @@ export function SwipeGesture({
 }
 </file>
 
-<file path="src/features/pose/poseGeometry.ts">
-import type { PosePoint, PosePoint2D } from './poseTypes'
-
-// Keep existing type imports working, including poseSession.ts.
-export type { PosePoint, PosePoint2D } from './poseTypes'
-
-export const BODY_POINTS = [11, 12, 13, 14, 15, 16, 23, 24] as const
-export const BODY_CONNECTIONS = [
-  [11, 12],
-  [11, 13],
-  [13, 15],
-  [12, 14],
-  [14, 16],
-  [11, 23],
-  [12, 24],
-  [23, 24],
-] as const
-
-/** Check only 2D information, preserving the caller's complete point type. */
-export function isVisible<T extends PosePoint2D>(
-  point: T | undefined,
-): point is T {
-  return (
-    !!point &&
-    Number.isFinite(point.x) &&
-    Number.isFinite(point.y) &&
-    point.x >= 0 &&
-    point.x <= 1 &&
-    point.y >= 0 &&
-    point.y <= 1 &&
-    Number.isFinite(point.visibility) &&
-    point.visibility >= 0.5 &&
-    point.visibility <= 1 &&
-    (point.presence === undefined ||
-      (Number.isFinite(point.presence) &&
-        point.presence >= 0.5 &&
-        point.presence <= 1))
-  )
-}
-
-// Canvas uses the video's intrinsic size. CSS object-fit: contain and the
-// shared parent transform handle letterboxing and mirroring for BOTH layers.
-export function normalizedToPixel(
-  point: Pick<PosePoint, 'x' | 'y'>,
-  width: number,
-  height: number,
-) {
-  return { x: point.x * width, y: point.y * height }
-}
-
-export type DetectionState = 'searching' | 'partial' | 'tracking'
-
-export function getDetectionState(
-  points: readonly PosePoint2D[],
-): DetectionState {
-  const count = BODY_POINTS.filter((index) => isVisible(points[index])).length
-  return count === BODY_POINTS.length
-    ? 'tracking'
-    : count > 0
-      ? 'partial'
-      : 'searching'
-}
-
-export function drawPose(
-  context: CanvasRenderingContext2D,
-  points: readonly PosePoint2D[],
-  width: number,
-  height: number,
-) {
-  context.clearRect(0, 0, width, height)
-  const scale = Math.max(1, width / 640)
-  context.lineWidth = 2.5 * scale
-  context.strokeStyle = '#c5ff80'
-  context.lineCap = 'round'
-  for (const [from, to] of BODY_CONNECTIONS) {
-    const a = points[from]
-    const b = points[to]
-    if (!isVisible(a) || !isVisible(b)) continue
-    const start = normalizedToPixel(a, width, height)
-    const end = normalizedToPixel(b, width, height)
-    context.beginPath()
-    context.moveTo(start.x, start.y)
-    context.lineTo(end.x, end.y)
-    context.stroke()
-  }
-  for (const index of BODY_POINTS) {
-    const point = points[index]
-    if (!isVisible(point)) continue
-    const pixel = normalizedToPixel(point, width, height)
-    context.beginPath()
-    context.arc(pixel.x, pixel.y, 4 * scale, 0, Math.PI * 2)
-    context.fillStyle = '#f5ffe8'
-    context.fill()
-    context.strokeStyle = '#274b35'
-    context.stroke()
-  }
-}
-</file>
-
 <file path="src/features/pose/poseLandmarker.ts">
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
 import type { PoseDetector } from './poseSession'
@@ -2182,596 +2314,6 @@ export function PoseOverlay({ source }: { source: PoseSource }) {
       className="pose-canvas"
       aria-label="肩・肘・手首・腰の骨格表示"
     />
-  )
-}
-</file>
-
-<file path="src/features/pose/poseTypes.ts">
-/** A MediaPipe landmark in the original, unmirrored video coordinates. */
-export interface PosePoint {
-  /** Normalized by the input video width. */
-  x: number
-  /** Normalized by the input video height. */
-  y: number
-  /**
-   * Relative depth, not meters and not restricted to [0, 1].
-   * Smaller values are closer to the camera; its scale is approximately x's.
-   * Missing depth must not be silently replaced with zero.
-   */
-  z: number
-  /** Per-landmark visibility in [0, 1]. */
-  visibility: number
-  /** Some runtime versions do not expose per-landmark presence. */
-  presence?: number
-}
-
-/** The 2D skeleton and gesture helpers do not require depth. */
-export type PosePoint2D = Pick<
-  PosePoint,
-  'x' | 'y' | 'visibility' | 'presence'
->
-
-/** One inference, shared without a React render for every landmark update. */
-export interface PoseFrame {
-  readonly landmarks: readonly PosePoint[]
-  /** Intrinsic video dimensions, not CSS dimensions. */
-  readonly width: number
-  readonly height: number
-  /** rAF/performance.now() time origin, in milliseconds. */
-  readonly timestamp: number
-  readonly inferenceMs?: number
-  readonly backend?: 'CPU' | 'GPU'
-}
-
-export interface PoseSource {
-  subscribe(listener: (frame: PoseFrame | null) => void): () => void
-}
-</file>
-
-<file path="src/features/virtualTryOn/GarmentOverlay.test.tsx">
-import { act, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { useFrame } from '@react-three/fiber'
-import type { RootState } from '@react-three/fiber'
-import { clone } from 'three/addons/utils/SkeletonUtils.js'
-import * as THREE from 'three'
-import { createPoseChannel } from '../pose/poseChannel'
-import type { PoseFrame } from '../pose/poseTypes'
-import { demoGarment } from '../wardrobe/garments'
-import { makePoseFrame } from '../../test/poseFixture'
-import { GarmentOverlay } from './GarmentOverlay'
-
-// Mock WebGL/loading, but exercise the actual tracker and Three.js transforms.
-vi.mock('@react-three/fiber', async () => {
-  const { createElement, Fragment } = await import('react')
-  return {
-    Canvas: ({ children }: { children: ReactNode }) =>
-      createElement(Fragment, null, children),
-    useFrame: vi.fn(),
-  }
-})
-vi.mock('@react-three/drei', async () => {
-  const { Group } = await import('three')
-  const scene = new Group()
-  return { useGLTF: Object.assign(vi.fn(() => ({ scene })), { clear: vi.fn() }) }
-})
-vi.mock('three/addons/utils/SkeletonUtils.js', async (importOriginal) => {
-  const original = await importOriginal<
-    typeof import('three/addons/utils/SkeletonUtils.js')
-  >()
-  return { ...original, clone: vi.fn(original.clone) }
-})
-
-let now = 1000
-beforeEach(() => {
-  now = 1000
-  vi.useFakeTimers()
-  vi.spyOn(performance, 'now').mockImplementation(() => now)
-})
-afterEach(() => {
-  vi.restoreAllMocks()
-  vi.useRealTimers()
-})
-
-function draw() {
-  const callback = vi.mocked(useFrame).mock.calls.at(-1)?.[0]
-  if (!callback) throw new Error('No R3F frame callback was registered')
-  act(() => callback({
-    size: { width: 640, height: 480 },
-    viewport: { width: 8, height: 6 },
-  } as RootState, 1 / 60))
-}
-function modelRoot(): THREE.Object3D {
-  const result = vi.mocked(clone).mock.results.at(-1)
-  if (!result || result.type !== 'return') throw new Error('No cloned model')
-  const model: THREE.Object3D = result.value
-  if (!model.parent?.parent) throw new Error('No shoulder anchor')
-  return model.parent.parent
-}
-function emit(
-  source: ReturnType<typeof createPoseChannel>,
-  frame: PoseFrame | null,
-  timestamp = now + 80,
-) {
-  now = timestamp
-  act(() => source.publish(frame ? { ...frame, timestamp } : null))
-  draw()
-}
-function acquire(
-  source: ReturnType<typeof createPoseChannel>,
-  frame = makePoseFrame(),
-) {
-  emit(source, frame)
-  emit(source, frame)
-  emit(source, frame)
-}
-function setup(mirrored = true) {
-  const source = createPoseChannel()
-  const view = render(
-    <GarmentOverlay source={source} garment={demoGarment} mirrored={mirrored} />,
-  )
-  return { source, view }
-}
-
-it('starts hidden, waits for fresh stable samples, and respects contain bars', () => {
-  const { source } = setup()
-  expect(modelRoot().visible).toBe(false)
-  emit(source, makePoseFrame())
-  emit(source, makePoseFrame())
-  expect(modelRoot().visible).toBe(false)
-  emit(source, makePoseFrame())
-  expect(modelRoot().visible).toBe(true)
-  expect(screen.getByText(/3D試着中/)).toBeInTheDocument()
-  // 1280x720 video inside 640x480 -> 60px top/bottom bars.
-  expect(modelRoot().position.x).toBeCloseTo(0)
-  expect(modelRoot().position.y).toBeCloseTo(1.125)
-})
-
-it.each([
-  { visibility: 0.49 },
-  { presence: 0.49 },
-  { visibility: Infinity },
-  { z: NaN },
-  { z: undefined },
-  { x: 1.1 },
-])('hides instead of applying invalid shoulder data: %j', (override) => {
-  const { source } = setup()
-  acquire(source)
-  const invalid = makePoseFrame()
-  Object.assign(invalid.landmarks[11], override)
-  emit(source, invalid)
-  expect(modelRoot().visible).toBe(false)
-  expect(screen.getByText(/正面を向いて/)).toBeInTheDocument()
-})
-
-it('uses different hide/show thresholds to avoid rapid visibility toggles', () => {
-  const { source } = setup()
-  acquire(source)
-  const borderline = makePoseFrame()
-  borderline.landmarks[11].x = 0.545
-  borderline.landmarks[12].x = 0.455
-  borderline.landmarks[11].visibility = 0.6
-  emit(source, borderline)
-  expect(modelRoot().visible).toBe(true)
-  const narrow = makePoseFrame()
-  narrow.landmarks[11].x = 0.535
-  narrow.landmarks[12].x = 0.465
-  emit(source, narrow)
-  expect(modelRoot().visible).toBe(false)
-  acquire(source, borderline)
-  expect(modelRoot().visible).toBe(false)
-  acquire(source)
-  expect(modelRoot().visible).toBe(true)
-})
-
-it('rejects a depth-dominated shoulder vector even when its image width is large', () => {
-  const { source } = setup()
-  acquire(source)
-  const sideways = makePoseFrame()
-  sideways.landmarks[11].z = 1
-  emit(source, sideways)
-  expect(modelRoot().visible).toBe(false)
-})
-
-it('preserves depth sign and computes roll using video pixels', () => {
-  const { source } = setup()
-  const tilted = makePoseFrame()
-  tilted.landmarks[11].y = 0.35
-  tilted.landmarks[11].z = -0.1
-  tilted.landmarks[12].z = 0.1
-  acquire(source, tilted)
-  const actual = new THREE.Vector3(1, 0, 0).applyQuaternion(modelRoot().quaternion)
-  const expected = new THREE.Vector3(320, -72, 256).normalize()
-  expect(actual.distanceTo(expected)).toBeLessThan(1e-10)
-})
-
-it('clears null/stalled poses, and never mirrors coordinates a second time', () => {
-  const { source, view } = setup(true)
-  const shifted = makePoseFrame()
-  shifted.landmarks[11].x += 0.1
-  shifted.landmarks[12].x += 0.1
-  acquire(source, shifted)
-  expect(modelRoot().position.x).toBeCloseTo(0.8)
-  view.rerender(
-    <GarmentOverlay source={source} garment={demoGarment} mirrored={false} />,
-  )
-  draw()
-  expect(modelRoot().position.x).toBeCloseTo(0.8)
-  emit(source, null)
-  expect(modelRoot().visible).toBe(false)
-  acquire(source)
-  now += 501
-  act(() => vi.advanceTimersByTime(501))
-  draw()
-  expect(modelRoot().visible).toBe(false)
-  expect(screen.getByText(/正面を向いて/)).toBeInTheDocument()
-})
-</file>
-
-<file path="src/features/virtualTryOn/GarmentOverlay.tsx">
-import {
-  Component,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import type { ReactNode, RefObject } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { useGLTF } from '@react-three/drei'
-import * as THREE from 'three'
-import { clone } from 'three/addons/utils/SkeletonUtils.js'
-import { isVisible } from '../pose/poseGeometry'
-import type { PoseFrame, PoseSource } from '../pose/poseTypes'
-import type { Garment } from '../wardrobe/garments'
-
-const MODEL_URL = `${import.meta.env.BASE_URL}garments/tshirt.glb`
-// Preserve the existing asset calibration; the GLB is not included in Repomix.
-const MODEL_SCALE = 0.05
-const MODEL_OFFSET_Y = -1.5
-
-const TRACKING = {
-  hideConfidence: 0.5,
-  showConfidence: 0.65,
-  hideWidth: 0.08,
-  showWidth: 0.1,
-  hideProjectionRatio: Math.cos((70 * Math.PI) / 180),
-  showProjectionRatio: Math.cos((60 * Math.PI) / 180),
-  reacquireMs: 150,
-  reacquireSamples: 3,
-  maxGapMs: 250,
-  staleMs: 500,
-  smoothingRate: 14,
-} as const
-
-type ModelState = 'loading' | 'ready' | 'error'
-
-interface ShoulderPose {
-  timestamp: number
-  width: number
-  height: number
-  midX: number
-  midY: number
-  shoulderWidthRatio: number
-  projectionRatio: number
-  confidence: number
-  yaw: number
-  roll: number
-}
-
-function measureShoulders(frame: PoseFrame): ShoulderPose | null {
-  const { width, height, landmarks, timestamp } = frame
-  if (![width, height].every((v) => Number.isFinite(v) && v > 0)) return null
-  const left = landmarks[11]
-  const right = landmarks[12]
-  if (
-    !isVisible(left) ||
-    !isVisible(right) ||
-    !Number.isFinite(left.z) ||
-    !Number.isFinite(right.z)
-  ) return null
-
-  // Anatomical right -> left, in UNMIRRORED video coordinates.
-  // x and y must be converted using their respective video dimensions.
-  const dx = (left.x - right.x) * width
-  const dy = (left.y - right.y) * height
-  const depthDiff = (left.z - right.z) * width
-  const shoulderWidthPx = Math.hypot(dx, dy)
-  // This is a relative-depth proxy, NOT a shoulder measurement in meters.
-  const shoulderWidth3D = Math.hypot(shoulderWidthPx, depthDiff)
-  if (
-    dx <= 0 ||
-    shoulderWidthPx <= 0 ||
-    !Number.isFinite(shoulderWidth3D)
-  ) return null
-  // dx <= 0 conservatively rejects reversed shoulders for upright front fitting.
-  // Two shoulders alone are not a general-purpose front/back classifier.
-
-  return {
-    timestamp,
-    width,
-    height,
-    midX: (left.x + right.x) / 2,
-    midY: (left.y + right.y) / 2,
-    shoulderWidthRatio: shoulderWidthPx / width,
-    projectionRatio: shoulderWidthPx / shoulderWidth3D,
-    confidence: Math.min(
-      left.visibility,
-      right.visibility,
-      left.presence ?? 1,
-      right.presence ?? 1,
-    ),
-    // Three.js: y is up and positive z points toward this camera.
-    // Rz(roll) * Ry(yaw) maps local +x onto (dx, -dy, -depthDiff).
-    yaw: Math.atan2(depthDiff, shoulderWidthPx),
-    roll: Math.atan2(-dy, dx),
-  }
-}
-
-/** Consume inference frames once, rather than counting repeated R3F frames. */
-function createShoulderTracker(onPose: (pose: ShoulderPose | null) => void) {
-  let visible = false
-  let goodSince: number | null = null
-  let goodSamples = 0
-  let lastTimestamp = -Infinity
-  let lastWidth = 0
-  let lastHeight = 0
-  let expiry: number | undefined
-
-  function cancelExpiry() {
-    if (expiry !== undefined) window.clearTimeout(expiry)
-    expiry = undefined
-  }
-  function hide() {
-    visible = false
-    goodSince = null
-    goodSamples = 0
-    onPose(null)
-  }
-  function reset() {
-    cancelExpiry()
-    hide()
-    lastTimestamp = -Infinity
-    lastWidth = 0
-    lastHeight = 0
-  }
-  function push(frame: PoseFrame | null) {
-    if (!frame) {
-      reset()
-      return
-    }
-    const age = performance.now() - frame.timestamp
-    if (
-      document.hidden ||
-      !Number.isFinite(age) ||
-      age < 0 ||
-      age >= TRACKING.staleMs
-    ) {
-      reset()
-      return
-    }
-    // Duplicates/out-of-order frames neither advance recovery nor renew expiry.
-    if (frame.timestamp <= lastTimestamp) return
-    cancelExpiry()
-    if (
-      frame.timestamp - lastTimestamp > TRACKING.maxGapMs ||
-      frame.width !== lastWidth ||
-      frame.height !== lastHeight
-    ) hide()
-    lastTimestamp = frame.timestamp
-    lastWidth = frame.width
-    lastHeight = frame.height
-
-    const pose = measureShoulders(frame)
-    const confidence = visible ? TRACKING.hideConfidence : TRACKING.showConfidence
-    const width = visible ? TRACKING.hideWidth : TRACKING.showWidth
-    const ratio = visible
-      ? TRACKING.hideProjectionRatio
-      : TRACKING.showProjectionRatio
-    if (
-      !pose ||
-      pose.confidence < confidence ||
-      pose.shoulderWidthRatio < width ||
-      pose.projectionRatio < ratio
-    ) {
-      hide()
-      return
-    }
-    if (!visible) {
-      goodSince ??= pose.timestamp
-      goodSamples += 1
-      visible =
-        goodSamples >= TRACKING.reacquireSamples &&
-        pose.timestamp - goodSince >= TRACKING.reacquireMs
-    }
-    onPose(visible ? pose : null)
-    // Also expire a replayed channel frame using its capture time, not receipt time.
-    expiry = window.setTimeout(reset, TRACKING.staleMs - age)
-  }
-  return { push, reset, dispose: cancelExpiry }
-}
-
-function GarmentModel({
-  targetRef,
-  onReady,
-}: {
-  targetRef: RefObject<ShoulderPose | null>
-  onReady: () => void
-}) {
-  const { scene } = useGLTF(MODEL_URL)
-  const root = useMemo(() => {
-    const anchor = new THREE.Group()
-    anchor.visible = false
-    const calibration = new THREE.Group()
-    calibration.position.y = MODEL_OFFSET_Y
-    calibration.scale.setScalar(MODEL_SCALE)
-    // Do not move/reparent the GLTF cache's shared scene; also support skinned GLBs.
-    calibration.add(clone(scene))
-    anchor.add(calibration)
-    return anchor
-  }, [scene])
-  const targetPosition = useMemo(() => new THREE.Vector3(), [])
-  const targetRotation = useMemo(() => new THREE.Quaternion(), [])
-  const euler = useMemo(() => new THREE.Euler(0, 0, 0, 'ZYX'), [])
-  const lastDrawn = useRef(-Infinity)
-
-  useEffect(() => {
-    onReady()
-    return () => {
-      root.traverse((object) => {
-        if (object instanceof THREE.SkinnedMesh) object.skeleton.dispose()
-      })
-    }
-  }, [onReady, root])
-
-  useFrame(({ size, viewport }, delta) => {
-    const pose = targetRef.current
-    if (
-      !pose ||
-      document.hidden ||
-      performance.now() - pose.timestamp >= TRACKING.staleMs ||
-      size.width <= 0 ||
-      size.height <= 0
-    ) {
-      root.visible = false
-      lastDrawn.current = -Infinity
-      return
-    }
-    // Match the video's object-fit: contain, including letterbox/pillarbox bars.
-    const fit = Math.min(size.width / pose.width, size.height / pose.height)
-    const videoWidth = pose.width * fit
-    const videoHeight = pose.height * fit
-    const px = (size.width - videoWidth) / 2 + pose.midX * videoWidth
-    const py = (size.height - videoHeight) / 2 + pose.midY * videoHeight
-    targetPosition.set(
-      (px / size.width - 0.5) * viewport.width,
-      (0.5 - py / size.height) * viewport.height,
-      0,
-    )
-    targetRotation.setFromEuler(euler.set(0, pose.yaw, pose.roll, 'ZYX'))
-    if (!root.visible || pose.timestamp - lastDrawn.current > TRACKING.maxGapMs) {
-      root.position.copy(targetPosition)
-      root.quaternion.copy(targetRotation)
-    } else {
-      const alpha = 1 - Math.exp(-TRACKING.smoothingRate * Math.max(0, delta))
-      root.position.lerp(targetPosition, alpha)
-      root.quaternion.slerp(targetRotation, alpha)
-    }
-    lastDrawn.current = pose.timestamp
-    root.visible = true
-  })
-
-  // Geometry/materials belong to the useGLTF cache, so do not dispose them here.
-  return <primitive object={root} dispose={null} />
-}
-
-class ModelErrorBoundary extends Component<
-  { children: ReactNode; onError: () => void },
-  { failed: boolean }
-> {
-  state = { failed: false }
-  static getDerivedStateFromError() {
-    return { failed: true }
-  }
-  componentDidCatch() {
-    this.props.onError()
-  }
-  render() {
-    return this.state.failed ? null : this.props.children
-  }
-}
-
-function WebGLFallback({ onError }: { onError: () => void }) {
-  useEffect(onError, [onError])
-  return null
-}
-
-export function GarmentOverlay({
-  source,
-  garment,
-  mirrored,
-}: {
-  source: PoseSource
-  garment: Garment
-  mirrored: boolean
-}) {
-  const targetRef = useRef<ShoulderPose | null>(null)
-  const [tracking, setTracking] = useState(false)
-  const [modelState, setModelState] = useState<ModelState>('loading')
-  const [attempt, setAttempt] = useState(0)
-  const onReady = useCallback(() => setModelState('ready'), [])
-  const onError = useCallback(() => setModelState('error'), [])
-
-  useEffect(() => {
-    let reported: boolean | undefined
-    const tracker = createShoulderTracker((pose) => {
-      targetRef.current = pose
-      const next = pose !== null
-      if (next !== reported) {
-        reported = next
-        setTracking(next)
-      }
-    })
-    tracker.reset()
-    const unsubscribe = source.subscribe(tracker.push)
-    const onVisibility = () => {
-      if (document.hidden) tracker.reset()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      unsubscribe()
-      tracker.dispose()
-      targetRef.current = null
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [source])
-
-  function retry() {
-    useGLTF.clear(MODEL_URL)
-    setModelState('loading')
-    setAttempt((value) => value + 1)
-  }
-
-  const message =
-    modelState === 'error'
-      ? '3Dモデルを表示できません。GLBの配置とWebGLを確認してください。'
-      : modelState === 'loading'
-        ? '3Dモデルを読み込んでいます…'
-        : tracking
-          ? `${garment.name} · 3D試着中`
-          : '正面を向いて両肩を映し、少し静止してください。遠い場合はカメラに近づいてください。'
-
-  return (
-    <>
-      <div className="pose-canvas garment-canvas" aria-label="試着する服">
-        <ModelErrorBoundary key={attempt} onError={onError}>
-          <Canvas
-            camera={{ position: [0, 0, 5], fov: 50 }}
-            gl={{ alpha: true, antialias: true }}
-            fallback={<WebGLFallback onError={onError} />}
-          >
-            <ambientLight intensity={1} />
-            <directionalLight position={[0, 0, 5]} intensity={1.5} />
-            <directionalLight position={[-5, 5, 2]} intensity={0.5} />
-            <Suspense fallback={null}>
-              <GarmentModel targetRef={targetRef} onReady={onReady} />
-            </Suspense>
-          </Canvas>
-        </ModelErrorBoundary>
-      </div>
-      {/* CameraView already mirrors the parent; only unmirror the feedback text. */}
-      <div className={`garment-feedback ${mirrored ? 'is-mirrored' : ''}`}>
-        <p className="pose-message" role="status">{message}</p>
-        {modelState === 'error' && (
-          <button type="button" className="pose-retry" onClick={retry}>
-            3Dモデルを再読み込み
-          </button>
-        )}
-      </div>
-    </>
   )
 }
 </file>
@@ -2996,6 +2538,103 @@ export function GarmentSelector({
       )}
     </div>
   )
+}
+</file>
+
+<file path="src/test/poseFixture.ts">
+import type { PoseFrame, PosePoint } from '../features/pose/poseTypes'
+
+export function makePoseFrame(): PoseFrame {
+  const landmarks: PosePoint[] = Array.from({ length: 33 }, () => ({
+    x: 0,
+    y: 0,
+    z: 0,
+    visibility: 0,
+  }))
+  landmarks[11] = { x: 0.625, y: 0.25, z: 0, visibility: 1 }
+  landmarks[12] = { x: 0.375, y: 0.25, z: 0, visibility: 1 }
+  landmarks[23] = { x: 0.625, y: 0.75, z: 0, visibility: 1 }
+  landmarks[24] = { x: 0.375, y: 0.75, z: 0, visibility: 1 }
+  return { width: 1280, height: 720, timestamp: 100, landmarks }
+}
+</file>
+
+<file path="src/test/setup.ts">
+import '@testing-library/jest-dom/vitest'
+import { cleanup } from '@testing-library/react'
+import { afterEach } from 'vitest'
+
+/**
+ * jsdom does not provide ResizeObserver.
+ *
+ * react-use-measure (used internally by @react-three/fiber) expects it to
+ * exist, even though unit/integration tests do not need real layout
+ * observation.
+ *
+ * Do not install this through vi.stubGlobal(), because individual test files
+ * may call vi.unstubAllGlobals() in afterEach().
+ */
+class ResizeObserverMock implements ResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    void callback
+  }
+
+  observe(
+    target: Element,
+    options?: ResizeObserverOptions,
+  ): void {
+    void target
+    void options
+  }
+
+  unobserve(target: Element): void {
+    void target
+  }
+
+  disconnect(): void {}
+}
+
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: ResizeObserverMock,
+  })
+}
+
+if (
+  typeof window !== 'undefined' &&
+  typeof window.ResizeObserver === 'undefined'
+) {
+  Object.defineProperty(window, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: ResizeObserverMock,
+  })
+}
+
+afterEach(cleanup)
+</file>
+
+<file path="src/test/swipeFixture.ts">
+import { makePoseFrame } from './poseFixture'
+
+// A front-facing torso: 320px shoulders, shoulders at y=180, hips at y=540.
+export function makeSwipeFrame(
+  timestamp: number,
+  x: number,
+  hand: 15 | 16 = 15,
+  y = 0.35,
+) {
+  const frame = makePoseFrame()
+  const landmarks = [...frame.landmarks]
+  landmarks[hand] = {
+    x: (640 + x * 320) / 1280,
+    y: (180 + y * 320) / 720,
+    z: 0,
+    visibility: 1,
+  }
+  return { ...frame, timestamp, landmarks }
 }
 </file>
 
@@ -3652,6 +3291,105 @@ export default defineConfig({
 </html>
 </file>
 
+<file path="src/features/pose/poseGeometry.ts">
+import type { PosePoint, PosePoint2D } from './poseTypes'
+
+// Keep existing type imports working, including poseSession.ts.
+export type { PosePoint, PosePoint2D } from './poseTypes'
+
+export const BODY_POINTS = [11, 12, 13, 14, 15, 16, 23, 24] as const
+export const BODY_CONNECTIONS = [
+  [11, 12],
+  [11, 13],
+  [13, 15],
+  [12, 14],
+  [14, 16],
+  [11, 23],
+  [12, 24],
+  [23, 24],
+] as const
+
+/** Check only 2D information, preserving the caller's complete point type. */
+export function isVisible<T extends PosePoint2D>(
+  point: T | undefined,
+): point is T {
+  return (
+    !!point &&
+    Number.isFinite(point.x) &&
+    Number.isFinite(point.y) &&
+    point.x >= 0 &&
+    point.x <= 1 &&
+    point.y >= 0 &&
+    point.y <= 1 &&
+    Number.isFinite(point.visibility) &&
+    point.visibility >= 0.5 &&
+    point.visibility <= 1 &&
+    (point.presence === undefined ||
+      (Number.isFinite(point.presence) &&
+        point.presence >= 0.5 &&
+        point.presence <= 1))
+  )
+}
+
+// Canvas uses the video's intrinsic size. CSS object-fit: contain and the
+// shared parent transform handle letterboxing and mirroring for BOTH layers.
+export function normalizedToPixel(
+  point: Pick<PosePoint, 'x' | 'y'>,
+  width: number,
+  height: number,
+) {
+  return { x: point.x * width, y: point.y * height }
+}
+
+export type DetectionState = 'searching' | 'partial' | 'tracking'
+
+export function getDetectionState(
+  points: readonly PosePoint2D[],
+): DetectionState {
+  const count = BODY_POINTS.filter((index) => isVisible(points[index])).length
+  return count === BODY_POINTS.length
+    ? 'tracking'
+    : count > 0
+      ? 'partial'
+      : 'searching'
+}
+
+export function drawPose(
+  context: CanvasRenderingContext2D,
+  points: readonly PosePoint2D[],
+  width: number,
+  height: number,
+) {
+  context.clearRect(0, 0, width, height)
+  const scale = Math.max(1, width / 640)
+  context.lineWidth = 2.5 * scale
+  context.strokeStyle = '#c5ff80'
+  context.lineCap = 'round'
+  for (const [from, to] of BODY_CONNECTIONS) {
+    const a = points[from]
+    const b = points[to]
+    if (!isVisible(a) || !isVisible(b)) continue
+    const start = normalizedToPixel(a, width, height)
+    const end = normalizedToPixel(b, width, height)
+    context.beginPath()
+    context.moveTo(start.x, start.y)
+    context.lineTo(end.x, end.y)
+    context.stroke()
+  }
+  for (const index of BODY_POINTS) {
+    const point = points[index]
+    if (!isVisible(point)) continue
+    const pixel = normalizedToPixel(point, width, height)
+    context.beginPath()
+    context.arc(pixel.x, pixel.y, 4 * scale, 0, Math.PI * 2)
+    context.fillStyle = '#f5ffe8'
+    context.fill()
+    context.strokeStyle = '#274b35'
+    context.stroke()
+  }
+}
+</file>
+
 <file path="src/features/pose/poseSession.test.ts">
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startPoseSession } from './poseSession'
@@ -3960,6 +3698,3821 @@ export function startPoseSession(
     }
   })
   return stop
+}
+</file>
+
+<file path="src/features/pose/poseTypes.ts">
+/** A MediaPipe landmark in the original, unmirrored video coordinates. */
+export interface PosePoint {
+  /** Normalized by the input video width. */
+  x: number
+  /** Normalized by the input video height. */
+  y: number
+  /**
+   * Relative depth, not meters and not restricted to [0, 1].
+   * Smaller values are closer to the camera; its scale is approximately x's.
+   * Missing depth must not be silently replaced with zero.
+   */
+  z: number
+  /** Per-landmark visibility in [0, 1]. */
+  visibility: number
+  /** Some runtime versions do not expose per-landmark presence. */
+  presence?: number
+}
+
+/** The 2D skeleton and gesture helpers do not require depth. */
+export type PosePoint2D = Pick<
+  PosePoint,
+  'x' | 'y' | 'visibility' | 'presence'
+>
+
+/** One inference, shared without a React render for every landmark update. */
+export interface PoseFrame {
+  readonly landmarks: readonly PosePoint[]
+  /** Intrinsic video dimensions, not CSS dimensions. */
+  readonly width: number
+  readonly height: number
+  /** rAF/performance.now() time origin, in milliseconds. */
+  readonly timestamp: number
+  readonly inferenceMs?: number
+  readonly backend?: 'CPU' | 'GPU'
+}
+
+export interface PoseSource {
+  subscribe(listener: (frame: PoseFrame | null) => void): () => void
+}
+</file>
+
+<file path="src/features/virtualTryOn/GarmentOverlay.test.tsx">
+import { act, cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
+import { useFrame } from '@react-three/fiber'
+import type { RootState } from '@react-three/fiber'
+import { clone } from 'three/addons/utils/SkeletonUtils.js'
+import * as THREE from 'three'
+import { createPoseChannel } from '../pose/poseChannel'
+import type { PoseFrame } from '../pose/poseTypes'
+import { demoGarment } from '../wardrobe/garments'
+import { makePoseFrame } from '../../test/poseFixture'
+import { GarmentOverlay } from './GarmentOverlay'
+
+// These are CPU scene-graph tests, not a WebGL rendering test.
+// The minimal Canvas double still produces React DOM warnings for R3F tags.
+vi.mock('@react-three/fiber', async () => {
+  const { createElement, Fragment } = await import('react')
+  return {
+    Canvas: ({ children }: { children: ReactNode }) => createElement(Fragment, null, children),
+    useFrame: vi.fn(),
+  }
+})
+vi.mock('@react-three/drei', async () => {
+  const { Group, Mesh, BoxGeometry, MeshStandardMaterial, Object3D } = await import('three')
+  const scene = new Group()
+  scene.name = 'FixtureAsset'
+  // A deliberately awkward imported pivot must not move the fitted shirt.
+  scene.position.set(40, -25, 50)
+  const mesh = new Mesh(new BoxGeometry(1.6, 1.7, 0.2), new MeshStandardMaterial())
+  mesh.name = 'FixtureCloth'
+  scene.add(mesh)
+  const left = new Object3D(), right = new Object3D()
+  left.name = 'AR_LeftShoulder'
+  right.name = 'AR_RightShoulder'
+  left.position.set(0.5, 0.7, 0)
+  right.position.set(-0.5, 0.7, 0)
+  scene.add(left, right)
+  return { useGLTF: Object.assign(vi.fn(() => ({ scene })), { clear: vi.fn() }) }
+})
+vi.mock('three/addons/utils/SkeletonUtils.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
+  return { ...original, clone: vi.fn(original.clone) }
+})
+
+let now = 1000
+let size = { width: 640, height: 480 }
+let camera: THREE.PerspectiveCamera
+beforeEach(() => {
+  now = 1000
+  size = { width: 640, height: 480 }
+  camera = new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 100)
+  camera.position.z = 5
+  camera.updateMatrixWorld(true)
+  vi.useFakeTimers()
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  vi.mocked(useFrame).mockClear()
+  vi.mocked(clone).mockClear()
+})
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
+
+function draw(delta = 1 / 60) {
+  const callback = vi.mocked(useFrame).mock.calls.at(-1)?.[0]
+  if (!callback) throw new Error('Missing useFrame callback')
+  camera.aspect = size.width / size.height
+  camera.updateProjectionMatrix()
+  act(() => callback({ camera, size } as RootState, delta))
+}
+function asset(): THREE.Object3D {
+  const result = vi.mocked(clone).mock.results.at(-1)
+  if (!result || result.type !== 'return') throw new Error('Missing cloned asset')
+  return result.value
+}
+function root(): THREE.Object3D {
+  let node: THREE.Object3D | null = asset()
+  while (node && node.name !== 'AR_GarmentRoot') node = node.parent
+  if (!node) throw new Error('Missing AR_GarmentRoot')
+  return node
+}
+function clothMaterial(): THREE.Material {
+  const mesh = asset().getObjectByName('FixtureCloth')
+  if (!(mesh instanceof THREE.Mesh) || Array.isArray(mesh.material)) throw new Error('Missing fixture material')
+  return mesh.material
+}
+function setup() {
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={demoGarment} mirrored />)
+  return { source, view }
+}
+function emit(source: ReturnType<typeof createPoseChannel>, frame: PoseFrame | null) {
+  now += 80
+  act(() => source.publish(frame ? { ...frame, timestamp: now } : null))
+  draw()
+}
+function acquire(source: ReturnType<typeof createPoseChannel>, frame = makePoseFrame()) {
+  emit(source, frame)
+  emit(source, frame)
+  emit(source, frame)
+}
+function shoulders(width = 1280, height = 720, ratio = 0.25): PoseFrame {
+  const base = makePoseFrame()
+  const landmarks = base.landmarks.map(p => ({ ...p }))
+  landmarks[11].x = 0.5 + ratio / 2
+  landmarks[12].x = 0.5 - ratio / 2
+  return { ...base, landmarks, width, height }
+}
+function cssPoint(frame: PoseFrame, index: number) {
+  const fit = Math.min(size.width / frame.width, size.height / frame.height)
+  return new THREE.Vector2(
+    (size.width - frame.width * fit) / 2 + frame.landmarks[index].x * frame.width * fit,
+    (size.height - frame.height * fit) / 2 + frame.landmarks[index].y * frame.height * fit,
+  )
+}
+function projectMarker(name: string) {
+  root().updateMatrixWorld(true)
+  const marker = asset().getObjectByName(name)
+  if (!marker) throw new Error('Missing fixture marker')
+  const p = marker.getWorldPosition(new THREE.Vector3()).project(camera)
+  return new THREE.Vector2((p.x + 1) * size.width / 2, (1 - p.y) * size.height / 2)
+}
+function expectFit(frame: PoseFrame) {
+  expect(projectMarker('AR_LeftShoulder').distanceTo(cssPoint(frame, 11))).toBeLessThan(1e-7)
+  expect(projectMarker('AR_RightShoulder').distanceTo(cssPoint(frame, 12))).toBeLessThan(1e-7)
+}
+
+it('fits real fixture shoulder markers, ignoring the imported asset pivot', () => {
+  const { source } = setup()
+  expect(root().visible).toBe(false)
+  emit(source, makePoseFrame())
+  emit(source, makePoseFrame())
+  expect(root().visible).toBe(false)
+  emit(source, makePoseFrame())
+  expect(root().visible).toBe(true)
+  expectFit(makePoseFrame())
+})
+
+it.each([
+  { visibility: 0.49 }, { presence: 0.49 }, { visibility: Infinity },
+  { z: NaN }, { z: undefined }, { x: 1.1 },
+])('freezes transforms and fades invalid shoulders: %j', override => {
+  const { source } = setup()
+  acquire(source)
+  const position = root().position.clone(), scale = root().scale.clone()
+  const opacity = clothMaterial().opacity
+  const invalid = makePoseFrame()
+  Object.assign(invalid.landmarks[11], override)
+  emit(source, invalid)
+  expect(root().position.equals(position)).toBe(true)
+  expect(root().scale.equals(scale)).toBe(true)
+  expect(clothMaterial().opacity).toBeGreaterThan(0)
+  expect(clothMaterial().opacity).toBeLessThan(opacity)
+  draw(0.5)
+  expect(root().visible).toBe(false)
+})
+
+it('requires recovery confidence after a low-confidence observation', () => {
+  const { source } = setup()
+  acquire(source)
+  const missing = makePoseFrame()
+  missing.landmarks[11].visibility = 0.4
+  emit(source, missing)
+  draw(0.5)
+  const borderline = makePoseFrame()
+  borderline.landmarks[11].visibility = 0.6
+  acquire(source, borderline)
+  expect(root().visible).toBe(false)
+  acquire(source)
+  expect(root().visible).toBe(true)
+})
+
+it('fades side-on and back-facing poses without reporting a model error', () => {
+  const { source } = setup()
+  acquire(source)
+  const sideways = makePoseFrame()
+  sideways.landmarks[11].z = 1
+  emit(source, sideways)
+  draw(0.5)
+  expect(root().visible).toBe(false)
+  acquire(source)
+  const back = makePoseFrame()
+  for (const [l, r] of [[11, 12], [23, 24]]) {
+    const lx = back.landmarks[l].x
+    back.landmarks[l].x = back.landmarks[r].x
+    back.landmarks[r].x = lx
+  }
+  emit(source, back)
+  draw(0.5)
+  expect(root().visible).toBe(false)
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+})
+
+it('fits both projected anchors with off-center yaw and roll', () => {
+  const { source } = setup()
+  const tilted = makePoseFrame()
+  tilted.landmarks[11].x += 0.12
+  tilted.landmarks[12].x += 0.12
+  tilted.landmarks[11].y = 0.31
+  tilted.landmarks[11].z = -0.1
+  tilted.landmarks[12].z = 0.1
+  acquire(source, tilted)
+  expect(root().visible).toBe(true)
+  expectFit(tilted)
+})
+
+it('fades stale data and does not mirror geometry twice', () => {
+  const { source, view } = setup()
+  acquire(source)
+  const position = root().position.clone()
+  view.rerender(<GarmentOverlay source={source} garment={demoGarment} mirrored={false} />)
+  draw()
+  expect(root().position.equals(position)).toBe(true)
+  now += 451
+  act(() => vi.advanceTimersByTime(451))
+  draw(0.5)
+  expect(root().visible).toBe(false)
+})
+
+it('increases projected garment size linearly with front-facing shoulder width', () => {
+  const far = setup()
+  acquire(far.source, shoulders(1280, 720, 0.25))
+  const farScale = root().scale.x
+  expectFit(shoulders(1280, 720, 0.25))
+  far.view.unmount()
+  const near = setup()
+  acquire(near.source, shoulders(1280, 720, 0.4))
+  expect(root().scale.x / farScale).toBeCloseTo(1.6, 8)
+  expectFit(shoulders(1280, 720, 0.4))
+})
+
+it('preserves the pixel fit for portrait/landscape videos and canvases', () => {
+  for (const canvas of [{ width: 640, height: 480 }, { width: 480, height: 800 }]) {
+    size = canvas
+    for (const [width, height] of [[1280, 720], [720, 1280]]) {
+      const fixture = setup()
+      const frame = shoulders(width, height)
+      acquire(fixture.source, frame)
+      expect(root().visible).toBe(true)
+      expectFit(frame)
+      fixture.view.unmount()
+    }
+  }
+})
+
+it('lerps scale using alpha rather than snapping on every observation', () => {
+  const { source } = setup()
+  acquire(source, shoulders())
+  const initial = root().scale.x
+  emit(source, shoulders(1280, 720, 0.5))
+  const first = root().scale.x
+  const alpha = 1 - Math.exp(-14 / 60)
+  expect(first).toBeCloseTo(initial + initial * alpha, 8)
+  emit(source, shoulders(1280, 720, 0.5))
+  expect(root().scale.x).toBeGreaterThan(first)
+  expect(root().scale.x).toBeLessThan(2 * initial)
+})
+</file>
+
+<file path="src/features/virtualTryOn/GarmentOverlay.tsx">
+import {
+  Component,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { useGLTF } from '@react-three/drei'
+import * as THREE from 'three'
+import { clone } from 'three/addons/utils/SkeletonUtils.js'
+import type {
+  PoseFrame,
+  PosePoint,
+  PoseSource,
+} from '../pose/poseTypes'
+import type { Garment } from '../wardrobe/garments'
+
+import { DEFAULT_GARMENT_MODEL_URL } from '../wardrobe/garments'
+
+const EPS = 1e-8
+
+const CAMERA_Z = 5
+const CAMERA_FOV = 50
+
+/**
+ * Model-space calibration.
+ *
+ * Prefer two Empty nodes in the GLB:
+ *
+ *   AR_LeftShoulder
+ *   AR_RightShoulder
+ *
+ * Both refer to the wearer's anatomical shoulders.
+ */
+const MODEL = {
+  leftMarker: 'AR_LeftShoulder',
+  rightMarker: 'AR_RightShoulder',
+
+  rotation: [
+    0,
+    0,
+    0,
+  ] as [number, number, number],
+
+  /**
+   * Fallback only when neither shoulder marker exists.
+   */
+  shoulderSpanOfBounds: 0.60,
+  shoulderHeightOfBounds: 0.84,
+  shoulderDepthOfBounds: 0.50,
+}
+
+const TRACK = {
+  hideConfidence: 0.50,
+  showConfidence: 0.65,
+
+  hideWidth: 0.08,
+  showWidth: 0.10,
+
+  hideFacing:
+    Math.cos(
+      65 * Math.PI / 180,
+    ),
+
+  showFacing:
+    Math.cos(
+      50 * Math.PI / 180,
+    ),
+
+  fullFacing:
+    Math.cos(
+      30 * Math.PI / 180,
+    ),
+
+  maxRenderYaw:
+    45 * Math.PI / 180,
+
+  reacquireMs: 160,
+  reacquireSamples: 3,
+
+  maxGapMs: 250,
+  staleMs: 450,
+
+  smoothingRate: 14,
+
+  fadeInRate: 10,
+  fadeOutRate: 14,
+
+  invisibleOpacity: 0.01,
+
+  /**
+   * Reject perspective fits that would put too much of the GLB
+   * toward or behind the camera.
+   */
+  maxDepthFraction: 0.30,
+} as const
+
+/**
+ * Arm occlusion settings.
+ *
+ * These values affect ONLY the invisible arm proxy meshes.
+ * They do not affect garment placement or scale.
+ */
+const OCCLUSION = {
+  enabled: true,
+
+  /**
+   * Hysteresis for shoulder/elbow/wrist landmark confidence.
+   */
+  enterConfidence: 0.80,
+  exitConfidence: 0.65,
+
+  /**
+   * Positive relative depth means that a joint is estimated
+   * closer to the camera than its corresponding shoulder.
+   */
+  enterFront: 0.12,
+  exitFront: 0.06,
+
+  /**
+   * Reject extreme MediaPipe relative-z excursions.
+   */
+  maxRelativeDepth: 1.25,
+
+  /**
+   * Converts normalized MediaPipe relative-z into a conservative
+   * world-depth offset relative to the projected shoulder span.
+   *
+   * This is intentionally independent of solveFit().
+   */
+  depthGain: 0.65,
+
+  maxAdvance: 0.70,
+  maxRetreat: 0.25,
+
+  reacquireMs: 60,
+  reacquireSamples: 2,
+
+  staleMs: 180,
+
+  smoothingRate: 30,
+  revealRate: 18,
+
+  maxDepthFraction: 0.35,
+
+  /**
+   * User-tuned upper-arm mask.
+   */
+  upper: {
+    radiusRatio: 0.065,
+
+    /**
+     * Keep the shoulder / proximal upper arm under the 3D sleeve.
+     */
+    startFraction: 0.55,
+    endFraction: 0.98,
+
+    minLengthRatio: 0.15,
+    maxLengthRatio: 1.25,
+  },
+
+  /**
+   * Forearm mask.
+   *
+   * Slightly thinner than the upper arm and stopped just before
+   * the wrist so the wrist sphere does not become an oversized
+   * fake hand mask.
+   */
+  forearm: {
+    radiusRatio: 0.052,
+
+    startFraction: 0.04,
+    endFraction: 0.96,
+
+    minLengthRatio: 0.12,
+    maxLengthRatio: 1.40,
+  },
+
+  /**
+   * Shadow catcher strength.
+   *
+   * This is the maximum black-alpha contribution of the
+   * THREE.ShadowMaterial. It is also multiplied by garment alpha.
+   */
+  shadowOpacity: 0.20,
+} as const
+
+type TrackingState =
+  | 'searching'
+  | 'turning'
+  | 'tracking'
+
+type ModelState =
+  | 'loading'
+  | 'ready'
+  | 'error'
+
+type ArmSide =
+  | 'left'
+  | 'right'
+
+type ArmSegmentKind =
+  | 'upper'
+  | 'forearm'
+
+interface ArmSegmentObservation {
+  /**
+   * Start/end normalized MediaPipe coordinates.
+   */
+  ax: number
+  ay: number
+
+  bx: number
+  by: number
+
+  /**
+   * Relative depths referenced to the corresponding shoulder.
+   *
+   * Positive = closer to camera than the shoulder.
+   */
+  aFront: number
+  bFront: number
+
+  confidence: number
+
+  /**
+   * Projected segment length divided by projected shoulder width.
+   */
+  lengthRatio: number
+}
+
+interface ArmObservation {
+  upper:
+    | ArmSegmentObservation
+    | null
+
+  forearm:
+    | ArmSegmentObservation
+    | null
+}
+
+interface Observation {
+  timestamp: number
+
+  width: number
+  height: number
+
+  lx: number
+  ly: number
+
+  rx: number
+  ry: number
+
+  widthRatio: number
+  confidence: number
+
+  facing: number
+  yaw: number
+
+  leftArm: ArmObservation
+  rightArm: ArmObservation
+}
+
+interface Target {
+  pose: Observation | null
+  opacity: number
+}
+
+interface Fit {
+  x: number
+  y: number
+
+  scale: number
+
+  yaw: number
+  roll: number
+}
+
+interface FadeMaterial {
+  material: THREE.Material
+
+  opacity: number
+  transparent: boolean
+
+  depthWrite: boolean
+  alphaTest: number
+}
+
+interface SegmentConfig {
+  radiusRatio: number
+
+  startFraction: number
+  endFraction: number
+
+  minLengthRatio: number
+  maxLengthRatio: number
+}
+
+function smooth01(
+  low: number,
+  high: number,
+  value: number,
+) {
+  const t =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        (value - low) /
+          (high - low),
+      ),
+    )
+
+  return (
+    t *
+    t *
+    (3 - 2 * t)
+  )
+}
+
+function pointConfidence(
+  point:
+    | PosePoint
+    | undefined,
+): number {
+  if (
+    !point ||
+    ![
+      point.x,
+      point.y,
+      point.z,
+      point.visibility,
+    ].every(Number.isFinite)
+  ) {
+    return 0
+  }
+
+  if (
+    point.x < 0 ||
+    point.x > 1 ||
+    point.y < 0 ||
+    point.y > 1
+  ) {
+    return 0
+  }
+
+  const presence =
+    point.presence ?? 1
+
+  if (
+    !Number.isFinite(presence) ||
+    presence < 0 ||
+    presence > 1
+  ) {
+    return 0
+  }
+
+  if (
+    point.visibility < 0 ||
+    point.visibility > 1
+  ) {
+    return 0
+  }
+
+  return Math.min(
+    point.visibility,
+    presence,
+  )
+}
+
+function createSegmentObservation(
+  a:
+    | PosePoint
+    | undefined,
+
+  b:
+    | PosePoint
+    | undefined,
+
+  aFront: number,
+  bFront: number,
+
+  width: number,
+  height: number,
+
+  shoulderPixels: number,
+):
+  | ArmSegmentObservation
+  | null {
+  if (
+    !a ||
+    !b ||
+    shoulderPixels <= EPS
+  ) {
+    return null
+  }
+
+  const confidence =
+    Math.min(
+      pointConfidence(a),
+      pointConfidence(b),
+    )
+
+  if (
+    confidence <
+    OCCLUSION.exitConfidence
+  ) {
+    return null
+  }
+
+  const lengthPixels =
+    Math.hypot(
+      (b.x - a.x) *
+        width,
+
+      (b.y - a.y) *
+        height,
+    )
+
+  const lengthRatio =
+    lengthPixels /
+    shoulderPixels
+
+  if (
+    !Number.isFinite(
+      lengthRatio,
+    ) ||
+    !Number.isFinite(
+      aFront,
+    ) ||
+    !Number.isFinite(
+      bFront,
+    )
+  ) {
+    return null
+  }
+
+  return {
+    ax: a.x,
+    ay: a.y,
+
+    bx: b.x,
+    by: b.y,
+
+    aFront,
+    bFront,
+
+    confidence,
+    lengthRatio,
+  }
+}
+
+function readArm(
+  shoulder:
+    | PosePoint
+    | undefined,
+
+  elbow:
+    | PosePoint
+    | undefined,
+
+  wrist:
+    | PosePoint
+    | undefined,
+
+  width: number,
+  height: number,
+
+  shoulderPixels: number,
+): ArmObservation {
+  if (
+    !shoulder ||
+    pointConfidence(shoulder) <
+      OCCLUSION.exitConfidence ||
+    shoulderPixels <= EPS
+  ) {
+    return {
+      upper: null,
+      forearm: null,
+    }
+  }
+
+  const elbowFront =
+    elbow &&
+    Number.isFinite(elbow.z)
+      ? (
+          shoulder.z -
+          elbow.z
+        ) *
+        width /
+        shoulderPixels
+      : NaN
+
+  const wristFront =
+    wrist &&
+    Number.isFinite(wrist.z)
+      ? (
+          shoulder.z -
+          wrist.z
+        ) *
+        width /
+        shoulderPixels
+      : NaN
+
+  return {
+    /**
+     * Shoulder -> elbow
+     *
+     * Shoulder is our relative-depth origin.
+     */
+    upper:
+      createSegmentObservation(
+        shoulder,
+        elbow,
+
+        0,
+        elbowFront,
+
+        width,
+        height,
+
+        shoulderPixels,
+      ),
+
+    /**
+     * Elbow -> wrist
+     *
+     * Both endpoint depths remain referenced to the same shoulder,
+     * so the segment gets a consistent sloped depth in world space.
+     */
+    forearm:
+      createSegmentObservation(
+        elbow,
+        wrist,
+
+        elbowFront,
+        wristFront,
+
+        width,
+        height,
+
+        shoulderPixels,
+      ),
+  }
+}
+
+function readObservation(
+  frame: PoseFrame,
+):
+  | Observation
+  | null {
+  const {
+    width,
+    height,
+    timestamp,
+    landmarks: p,
+  } = frame
+
+  if (
+    ![
+      width,
+      height,
+      timestamp,
+    ].every(Number.isFinite) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null
+  }
+
+  const l =
+    p[11]
+
+  const r =
+    p[12]
+
+  const confidence =
+    Math.min(
+      pointConfidence(l),
+      pointConfidence(r),
+    )
+
+  if (
+    !l ||
+    !r ||
+    confidence <
+      TRACK.hideConfidence
+  ) {
+    return null
+  }
+
+  const sx =
+    (l.x - r.x) *
+    width
+
+  const sy =
+    -(l.y - r.y) *
+    height
+
+  const sz =
+    -(l.z - r.z) *
+    width
+
+  const imageWidth =
+    Math.hypot(
+      sx,
+      sy,
+    )
+
+  const vectorWidth =
+    Math.hypot(
+      imageWidth,
+      sz,
+    )
+
+  if (
+    !Number.isFinite(
+      vectorWidth,
+    ) ||
+    imageWidth < EPS
+  ) {
+    return null
+  }
+
+  /**
+   * Signed shoulder orientation is one cue,
+   * not a definitive front/back classifier.
+   */
+  let facing =
+    sx /
+    vectorWidth
+
+  const lh =
+    p[23]
+
+  const rh =
+    p[24]
+
+  if (
+    lh &&
+    rh &&
+    Math.min(
+      pointConfidence(lh),
+      pointConfidence(rh),
+    ) >= 0.60
+  ) {
+    const ux =
+      (
+        l.x +
+        r.x -
+        lh.x -
+        rh.x
+      ) /
+      2 *
+      width
+
+    const uy =
+      -(
+        l.y +
+        r.y -
+        lh.y -
+        rh.y
+      ) /
+      2 *
+      height
+
+    const uz =
+      -(
+        l.z +
+        r.z -
+        lh.z -
+        rh.z
+      ) /
+      2 *
+      width
+
+    /**
+     * Torso front normal:
+     *
+     * shoulder(right -> left)
+     *      x
+     * torso(hips -> shoulders)
+     */
+    const nx =
+      sy * uz -
+      sz * uy
+
+    const ny =
+      sz * ux -
+      sx * uz
+
+    const nz =
+      sx * uy -
+      sy * ux
+
+    const length =
+      Math.hypot(
+        nx,
+        ny,
+        nz,
+      )
+
+    if (
+      !Number.isFinite(
+        length,
+      ) ||
+      length < EPS
+    ) {
+      return null
+    }
+
+    facing =
+      Math.min(
+        facing,
+        nz / length,
+      )
+  }
+
+  return {
+    timestamp,
+    width,
+    height,
+
+    lx: l.x,
+    ly: l.y,
+
+    rx: r.x,
+    ry: r.y,
+
+    widthRatio:
+      imageWidth /
+      Math.min(
+        width,
+        height,
+      ),
+
+    confidence,
+    facing,
+
+    /**
+     * Arm observation failure does NOT reject the garment pose.
+     */
+    leftArm:
+      readArm(
+        l,
+        p[13],
+        p[15],
+
+        width,
+        height,
+
+        imageWidth,
+      ),
+
+    rightArm:
+      readArm(
+        r,
+        p[14],
+        p[16],
+
+        width,
+        height,
+
+        imageWidth,
+      ),
+
+    /**
+     * Relative z affects bounded garment orientation,
+     * never the base garment scale.
+     */
+    yaw:
+      THREE.MathUtils.clamp(
+        Math.atan2(
+          -sz,
+          imageWidth,
+        ),
+
+        -TRACK.maxRenderYaw,
+        TRACK.maxRenderYaw,
+      ),
+  }
+}
+
+function createTracker(
+  report: (
+    target: Target,
+    state: TrackingState,
+  ) => void,
+) {
+  let active = false
+
+  let goodSince:
+    | number
+    | null = null
+
+  let samples = 0
+
+  let lastTime =
+    -Infinity
+
+  let width = 0
+  let height = 0
+
+  let timer:
+    | number
+    | undefined
+
+  function clearTimer() {
+    if (
+      timer !==
+      undefined
+    ) {
+      window.clearTimeout(
+        timer,
+      )
+    }
+
+    timer =
+      undefined
+  }
+
+  function hide(
+    state:
+      TrackingState =
+      'searching',
+  ) {
+    active = false
+
+    goodSince = null
+    samples = 0
+
+    report(
+      {
+        pose: null,
+        opacity: 0,
+      },
+
+      state,
+    )
+  }
+
+  function reset() {
+    clearTimer()
+
+    lastTime =
+      -Infinity
+
+    width = 0
+    height = 0
+
+    hide()
+  }
+
+  function push(
+    frame:
+      | PoseFrame
+      | null,
+  ) {
+    if (
+      !frame ||
+      document.hidden
+    ) {
+      reset()
+      return
+    }
+
+    const age =
+      performance.now() -
+      frame.timestamp
+
+    if (
+      !Number.isFinite(age) ||
+      age < 0 ||
+      age >=
+        TRACK.staleMs
+    ) {
+      reset()
+      return
+    }
+
+    if (
+      frame.timestamp <=
+      lastTime
+    ) {
+      return
+    }
+
+    clearTimer()
+
+    if (
+      frame.timestamp -
+        lastTime >
+        TRACK.maxGapMs ||
+      frame.width !==
+        width ||
+      frame.height !==
+        height
+    ) {
+      hide()
+    }
+
+    lastTime =
+      frame.timestamp
+
+    width =
+      frame.width
+
+    height =
+      frame.height
+
+    const pose =
+      readObservation(
+        frame,
+      )
+
+    if (!pose) {
+      hide()
+      return
+    }
+
+    const minConfidence =
+      active
+        ? TRACK.hideConfidence
+        : TRACK.showConfidence
+
+    const minWidth =
+      active
+        ? TRACK.hideWidth
+        : TRACK.showWidth
+
+    const minFacing =
+      active
+        ? TRACK.hideFacing
+        : TRACK.showFacing
+
+    if (
+      pose.confidence <
+        minConfidence ||
+      pose.widthRatio <
+        minWidth ||
+      pose.facing <
+        minFacing
+    ) {
+      hide(
+        pose.facing <
+          TRACK.showFacing
+          ? 'turning'
+          : 'searching',
+      )
+
+      return
+    }
+
+    if (!active) {
+      goodSince ??=
+        pose.timestamp
+
+      samples += 1
+
+      active =
+        samples >=
+          TRACK.reacquireSamples &&
+        pose.timestamp -
+          goodSince >=
+          TRACK.reacquireMs
+    }
+
+    if (active) {
+      const opacity =
+        smooth01(
+          TRACK.hideFacing,
+          TRACK.fullFacing,
+          pose.facing,
+        ) *
+        smooth01(
+          TRACK.hideConfidence,
+          0.85,
+          pose.confidence,
+        )
+
+      report(
+        {
+          pose,
+          opacity,
+        },
+
+        opacity < 0.65
+          ? 'turning'
+          : 'tracking',
+      )
+    } else {
+      report(
+        {
+          pose: null,
+          opacity: 0,
+        },
+
+        'searching',
+      )
+    }
+
+    timer =
+      window.setTimeout(
+        reset,
+        TRACK.staleMs -
+          age,
+      )
+  }
+
+  return {
+    push,
+    reset,
+    dispose:
+      clearTimer,
+  }
+}
+
+/**
+ * Normalized model shoulder anchors:
+ *
+ * right = (-0.5, 0, 0)
+ * left  = (+0.5, 0, 0)
+ *
+ * Solve their perspective projection, including off-center yaw.
+ */
+function solveFit(
+  lx: number,
+  ly: number,
+
+  rx: number,
+  ry: number,
+
+  distance: number,
+  yaw: number,
+):
+  | Fit
+  | null {
+  const dx =
+    lx - rx
+
+  const dy =
+    ly - ry
+
+  const span =
+    Math.hypot(
+      dx,
+      dy,
+    )
+
+  if (
+    ![
+      lx,
+      ly,
+      rx,
+      ry,
+      span,
+      distance,
+      yaw,
+    ].every(Number.isFinite) ||
+    span < EPS ||
+    distance <= EPS
+  ) {
+    return null
+  }
+
+  const px =
+    (lx + rx) /
+    2
+
+  const py =
+    (ly + ry) /
+    2
+
+  const nx =
+    dx /
+    span
+
+  const ny =
+    dy /
+    span
+
+  const uz =
+    -Math.sin(
+      yaw,
+    )
+
+  const mx =
+    uz *
+    px /
+    distance
+
+  const my =
+    uz *
+    py /
+    distance
+
+  const dot =
+    nx * mx +
+    ny * my
+
+  const discriminant =
+    dot * dot +
+    1 -
+    uz * uz -
+    mx * mx -
+    my * my
+
+  if (
+    !Number.isFinite(
+      discriminant,
+    ) ||
+    discriminant <= EPS
+  ) {
+    return null
+  }
+
+  const k =
+    dot +
+    Math.sqrt(
+      discriminant,
+    )
+
+  if (
+    !Number.isFinite(k) ||
+    k <= EPS
+  ) {
+    return null
+  }
+
+  const scale =
+    span /
+    k
+
+  return {
+    x:
+      px -
+      scale *
+      uz *
+      dx /
+      (
+        4 *
+        distance
+      ),
+
+    y:
+      py -
+      scale *
+      uz *
+      dy /
+      (
+        4 *
+        distance
+      ),
+
+    scale,
+    yaw,
+
+    roll:
+      Math.atan2(
+        k * ny - my,
+        k * nx - mx,
+      ),
+  }
+}
+
+function buildModel(
+  scene: THREE.Object3D,
+) {
+  const asset =
+    clone(scene)
+
+  const oriented =
+    new THREE.Group()
+
+  oriented.rotation.set(
+    ...MODEL.rotation,
+  )
+
+  oriented.add(
+    asset,
+  )
+
+  oriented.updateMatrixWorld(
+    true,
+  )
+
+  const box =
+    new THREE.Box3()
+      .setFromObject(
+        oriented,
+        true,
+      )
+
+  const size =
+    box.getSize(
+      new THREE.Vector3(),
+    )
+
+  if (
+    box.isEmpty() ||
+    ![
+      size.x,
+      size.y,
+      size.z,
+    ].every(Number.isFinite) ||
+    size.x < EPS ||
+    size.y < EPS
+  ) {
+    throw new Error(
+      'GLB has no measurable garment geometry',
+    )
+  }
+
+  const lNode =
+    asset.getObjectByName(
+      MODEL.leftMarker,
+    )
+
+  const rNode =
+    asset.getObjectByName(
+      MODEL.rightMarker,
+    )
+
+  if (
+    Boolean(lNode) !==
+    Boolean(rNode)
+  ) {
+    throw new Error(
+      'Provide BOTH AR shoulder markers',
+    )
+  }
+
+  const left =
+    new THREE.Vector3()
+
+  const right =
+    new THREE.Vector3()
+
+  if (
+    lNode &&
+    rNode
+  ) {
+    lNode.getWorldPosition(
+      left,
+    )
+
+    rNode.getWorldPosition(
+      right,
+    )
+  } else {
+    const center =
+      box.getCenter(
+        new THREE.Vector3(),
+      )
+
+    const half =
+      size.x *
+      MODEL.shoulderSpanOfBounds /
+      2
+
+    const y =
+      box.min.y +
+      size.y *
+      MODEL.shoulderHeightOfBounds
+
+    const z =
+      box.min.z +
+      size.z *
+      MODEL.shoulderDepthOfBounds
+
+    left.set(
+      center.x + half,
+      y,
+      z,
+    )
+
+    right.set(
+      center.x - half,
+      y,
+      z,
+    )
+  }
+
+  const shoulderWidth =
+    left.distanceTo(
+      right,
+    )
+
+  if (
+    !Number.isFinite(
+      shoulderWidth,
+    ) ||
+    shoulderWidth < EPS
+  ) {
+    throw new Error(
+      'Invalid GLB shoulder markers',
+    )
+  }
+
+  const center =
+    left
+      .clone()
+      .add(right)
+      .multiplyScalar(
+        0.5,
+      )
+
+  const direction =
+    left
+      .clone()
+      .sub(right)
+      .normalize()
+
+  const rotation =
+    new THREE.Quaternion()
+      .setFromUnitVectors(
+        direction,
+        new THREE.Vector3(
+          1,
+          0,
+          0,
+        ),
+      )
+
+  const normalized =
+    new THREE.Group()
+
+  normalized.quaternion.copy(
+    rotation,
+  )
+
+  normalized.scale.setScalar(
+    1 /
+      shoulderWidth,
+  )
+
+  normalized.position
+    .copy(center)
+    .applyQuaternion(
+      rotation,
+    )
+    .multiplyScalar(
+      -1 /
+        shoulderWidth,
+    )
+
+  normalized.add(
+    oriented,
+  )
+
+  normalized.updateMatrixWorld(
+    true,
+  )
+
+  /**
+   * Full normalized garment bounds used for perspective safety.
+   */
+  const normalizedBounds =
+    new THREE.Box3()
+      .setFromObject(
+        normalized,
+        true,
+      )
+
+  const corners:
+    THREE.Vector3[] = []
+
+  for (
+    const x of [
+      normalizedBounds.min.x,
+      normalizedBounds.max.x,
+    ]
+  ) {
+    for (
+      const y of [
+        normalizedBounds.min.y,
+        normalizedBounds.max.y,
+      ]
+    ) {
+      for (
+        const z of [
+          normalizedBounds.min.z,
+          normalizedBounds.max.z,
+        ]
+      ) {
+        corners.push(
+          new THREE.Vector3(
+            x,
+            y,
+            z,
+          ),
+        )
+      }
+    }
+  }
+
+  const materials:
+    FadeMaterial[] = []
+
+  const materialMap =
+    new Map<
+      THREE.Material,
+      THREE.Material
+    >()
+
+  const skeletons =
+    new Set<
+      THREE.Skeleton
+    >()
+
+  const shadowCasters:
+    THREE.Mesh[] = []
+
+  function ownMaterial(
+    source:
+      THREE.Material,
+  ) {
+    const existing =
+      materialMap.get(
+        source,
+      )
+
+    if (existing) {
+      return existing
+    }
+
+    const material =
+      source.clone()
+
+    materials.push({
+      material,
+
+      opacity:
+        source.opacity,
+
+      transparent:
+        source.transparent,
+
+      depthWrite:
+        source.depthWrite,
+
+      alphaTest:
+        source.alphaTest,
+    })
+
+    material.transparent =
+      true
+
+    material.opacity =
+      0
+
+    material.depthWrite =
+      false
+
+    materialMap.set(
+      source,
+      material,
+    )
+
+    return material
+  }
+
+  asset.traverse(
+    (object) => {
+      if (
+        object instanceof
+        THREE.Mesh
+      ) {
+        object.material =
+          Array.isArray(
+            object.material,
+          )
+            ? object.material.map(
+                ownMaterial,
+              )
+            : ownMaterial(
+                object.material,
+              )
+
+        /**
+         * Garment casts shadows onto the transparent
+         * arm shadow receivers.
+         */
+        object.castShadow =
+          true
+
+        object.receiveShadow =
+          false
+
+        shadowCasters.push(
+          object,
+        )
+      }
+
+      if (
+        object instanceof
+        THREE.SkinnedMesh
+      ) {
+        skeletons.add(
+          object.skeleton,
+        )
+      }
+    },
+  )
+
+  const root =
+    new THREE.Group()
+
+  root.name =
+    'AR_GarmentRoot'
+
+  root.visible =
+    false
+
+  root.add(
+    normalized,
+  )
+
+  return {
+    root,
+
+    materials,
+    skeletons,
+
+    corners,
+
+    shadowCasters,
+
+    alpha: 0,
+
+    placed: false,
+  }
+}
+
+function createArmOccluders() {
+  /**
+   * ------------------------------------------------------------
+   * DEPTH-ONLY MATERIAL
+   * ------------------------------------------------------------
+   *
+   * It writes depth, never color.
+   */
+  const depthMaterial =
+    new THREE.MeshBasicMaterial()
+
+  depthMaterial.colorWrite =
+    false
+
+  depthMaterial.depthWrite =
+    true
+
+  depthMaterial.depthTest =
+    true
+
+  depthMaterial.transparent =
+    false
+
+  depthMaterial.side =
+    THREE.DoubleSide
+
+  /**
+   * ------------------------------------------------------------
+   * SHADOW RECEIVER MATERIAL
+   * ------------------------------------------------------------
+   *
+   * This produces only the darkness of received shadows.
+   *
+   * The underlying DOM video remains visible everywhere else.
+   */
+  const shadowMaterial =
+    new THREE.ShadowMaterial({
+      color: 0x000000,
+      opacity:
+        OCCLUSION.shadowOpacity,
+    })
+
+  shadowMaterial.transparent =
+    true
+
+  shadowMaterial.depthWrite =
+    false
+
+  shadowMaterial.depthTest =
+    true
+
+  shadowMaterial.side =
+    THREE.DoubleSide
+
+  /**
+   * Pull the visible shadow receiver very slightly toward the camera
+   * relative to its identical depth-only surface.
+   *
+   * This avoids z-fighting between the two coincident proxy surfaces.
+   */
+  shadowMaterial.polygonOffset =
+    true
+
+  shadowMaterial.polygonOffsetFactor =
+    -1
+
+  shadowMaterial.polygonOffsetUnits =
+    -1
+
+  /**
+   * Shared unit geometry.
+   */
+  const cylinder =
+    new THREE.CylinderGeometry(
+      1,
+      1,
+      1,
+      12,
+    )
+
+  const sphere =
+    new THREE.SphereGeometry(
+      1,
+      12,
+      8,
+    )
+
+  const root =
+    new THREE.Group()
+
+  root.name =
+    'AR_ArmOcclusion'
+
+  root.visible =
+    false
+
+  root.renderOrder =
+    -1000
+
+  function createMeshPair(
+    geometry:
+      THREE.BufferGeometry,
+  ) {
+    const depth =
+      new THREE.Mesh(
+        geometry,
+        depthMaterial,
+      )
+
+    const shadow =
+      new THREE.Mesh(
+        geometry,
+        shadowMaterial,
+      )
+
+    /**
+     * Depth mask renders before garment.
+     */
+    depth.renderOrder =
+      -1000
+
+    depth.castShadow =
+      false
+
+    depth.receiveShadow =
+      false
+
+    /**
+     * Shadow receiver is transparent and rendered separately.
+     */
+    shadow.renderOrder =
+      -900
+
+    shadow.castShadow =
+      false
+
+    shadow.receiveShadow =
+      true
+
+    return {
+      depth,
+      shadow,
+    }
+  }
+
+  function makeSegment(
+    name: string,
+
+    side:
+      ArmSide,
+
+    kind:
+      ArmSegmentKind,
+
+    shoulderX: number,
+
+    config:
+      SegmentConfig,
+  ) {
+    const group =
+      new THREE.Group()
+
+    group.name =
+      name
+
+    group.visible =
+      false
+
+    group.renderOrder =
+      -1000
+
+    const body =
+      createMeshPair(
+        cylinder,
+      )
+
+    const startCap =
+      createMeshPair(
+        sphere,
+      )
+
+    const endCap =
+      createMeshPair(
+        sphere,
+      )
+
+    group.add(
+      body.depth,
+      body.shadow,
+
+      startCap.depth,
+      startCap.shadow,
+
+      endCap.depth,
+      endCap.shadow,
+    )
+
+    root.add(
+      group,
+    )
+
+    return {
+      group,
+
+      body,
+      startCap,
+      endCap,
+
+      side,
+      kind,
+
+      shoulderX,
+      config,
+
+      start:
+        new THREE.Vector3(),
+
+      end:
+        new THREE.Vector3(),
+
+      active: false,
+      placed: false,
+
+      lastTime:
+        -Infinity,
+
+      goodSince: 0,
+
+      samples: 0,
+
+      radius: 0,
+
+      strength: 0,
+    }
+  }
+
+  const segments = [
+    makeSegment(
+      'AR_LeftUpperArm',
+      'left',
+      'upper',
+      0.5,
+      OCCLUSION.upper,
+    ),
+
+    makeSegment(
+      'AR_RightUpperArm',
+      'right',
+      'upper',
+      -0.5,
+      OCCLUSION.upper,
+    ),
+
+    makeSegment(
+      'AR_LeftForearm',
+      'left',
+      'forearm',
+      0.5,
+      OCCLUSION.forearm,
+    ),
+
+    makeSegment(
+      'AR_RightForearm',
+      'right',
+      'forearm',
+      -0.5,
+      OCCLUSION.forearm,
+    ),
+  ]
+
+  type Segment =
+    (typeof segments)[number]
+
+  /**
+   * Reusable scratch state.
+   */
+  const raycaster =
+    new THREE.Raycaster()
+
+  const plane =
+    new THREE.Plane(
+      new THREE.Vector3(
+        0,
+        0,
+        1,
+      ),
+      0,
+    )
+
+  const ndc =
+    new THREE.Vector2()
+
+  const origin =
+    new THREE.Vector3()
+
+  const leftPlane =
+    new THREE.Vector3()
+
+  const rightPlane =
+    new THREE.Vector3()
+
+  const anchor =
+    new THREE.Vector3()
+
+  const rawStart =
+    new THREE.Vector3()
+
+  const rawEnd =
+    new THREE.Vector3()
+
+  const croppedStart =
+    new THREE.Vector3()
+
+  const croppedEnd =
+    new THREE.Vector3()
+
+  const axis =
+    new THREE.Vector3()
+
+  const up =
+    new THREE.Vector3(
+      0,
+      1,
+      0,
+    )
+
+  const bodyCenter =
+    new THREE.Vector3()
+
+  const bodyQuaternion =
+    new THREE.Quaternion()
+
+  const bodyScale =
+    new THREE.Vector3()
+
+  const capScale =
+    new THREE.Vector3()
+
+  const map = {
+    width: 1,
+    height: 1,
+
+    vw: 1,
+    vh: 1,
+
+    ox: 0,
+    oy: 0,
+  }
+
+  function disable(
+    segment:
+      Segment,
+  ) {
+    segment.group.visible =
+      false
+
+    segment.active =
+      false
+
+    segment.placed =
+      false
+
+    segment.samples =
+      0
+
+    segment.lastTime =
+      -Infinity
+
+    segment.strength =
+      0
+  }
+
+  function hide() {
+    root.visible =
+      false
+
+    for (
+      const segment
+      of segments
+    ) {
+      disable(
+        segment,
+      )
+    }
+  }
+
+  /**
+   * Back-project a normalized MediaPipe pixel coordinate
+   * onto an arbitrary constant-Z world plane.
+   */
+  function project(
+    x: number,
+    y: number,
+
+    z: number,
+
+    camera:
+      THREE.PerspectiveCamera,
+
+    output:
+      THREE.Vector3,
+  ): boolean {
+    ndc.set(
+      2 *
+        (
+          map.ox +
+          x * map.vw
+        ) /
+        map.width -
+        1,
+
+      1 -
+        2 *
+        (
+          map.oy +
+          y * map.vh
+        ) /
+        map.height,
+    )
+
+    raycaster.setFromCamera(
+      ndc,
+      camera,
+    )
+
+    /**
+     * Plane equation:
+     *
+     * z = requested z
+     *
+     * n=(0,0,1)
+     * constant=-z
+     */
+    plane.constant =
+      -z
+
+    return (
+      raycaster.ray
+        .intersectPlane(
+          plane,
+          output,
+        ) !== null &&
+      [
+        output.x,
+        output.y,
+        output.z,
+      ].every(Number.isFinite)
+    )
+  }
+
+  function getObservation(
+    pose:
+      Observation,
+
+    segment:
+      Segment,
+  ):
+    | ArmSegmentObservation
+    | null {
+    const arm =
+      segment.side ===
+      'left'
+        ? pose.leftArm
+        : pose.rightArm
+
+    return (
+      segment.kind ===
+      'upper'
+        ? arm.upper
+        : arm.forearm
+    )
+  }
+
+  function copyTransform(
+    source:
+      THREE.Object3D,
+
+    target:
+      THREE.Object3D,
+  ) {
+    target.position.copy(
+      source.position,
+    )
+
+    target.quaternion.copy(
+      source.quaternion,
+    )
+
+    target.scale.copy(
+      source.scale,
+    )
+  }
+
+  function applyCapsuleTransform(
+    segment:
+      Segment,
+
+    radius: number,
+  ): boolean {
+    axis.subVectors(
+      segment.end,
+      segment.start,
+    )
+
+    const length =
+      axis.length()
+
+    if (
+      !Number.isFinite(
+        length,
+      ) ||
+      length <= EPS ||
+      radius <= EPS
+    ) {
+      return false
+    }
+
+    bodyCenter
+      .copy(
+        segment.start,
+      )
+      .add(
+        segment.end,
+      )
+      .multiplyScalar(
+        0.5,
+      )
+
+    bodyQuaternion
+      .setFromUnitVectors(
+        up,
+        axis.normalize(),
+      )
+
+    bodyScale.set(
+      radius,
+      length,
+      radius,
+    )
+
+    capScale.setScalar(
+      radius,
+    )
+
+    /**
+     * Depth cylinder.
+     */
+    segment.body.depth.position.copy(
+      bodyCenter,
+    )
+
+    segment.body.depth.quaternion.copy(
+      bodyQuaternion,
+    )
+
+    segment.body.depth.scale.copy(
+      bodyScale,
+    )
+
+    /**
+     * Shadow cylinder gets EXACTLY the same spatial transform.
+     */
+    copyTransform(
+      segment.body.depth,
+      segment.body.shadow,
+    )
+
+    /**
+     * Start sphere.
+     */
+    segment.startCap.depth.position.copy(
+      segment.start,
+    )
+
+    segment.startCap.depth.quaternion.identity()
+
+    segment.startCap.depth.scale.copy(
+      capScale,
+    )
+
+    copyTransform(
+      segment.startCap.depth,
+      segment.startCap.shadow,
+    )
+
+    /**
+     * End sphere.
+     */
+    segment.endCap.depth.position.copy(
+      segment.end,
+    )
+
+    segment.endCap.depth.quaternion.identity()
+
+    segment.endCap.depth.scale.copy(
+      capScale,
+    )
+
+    copyTransform(
+      segment.endCap.depth,
+      segment.endCap.shadow,
+    )
+
+    return true
+  }
+
+  function update(
+    pose:
+      Observation,
+
+    camera:
+      THREE.PerspectiveCamera,
+
+    size: {
+      width: number
+      height: number
+    },
+
+    garmentRoot:
+      THREE.Group,
+
+    garmentOpacity:
+      number,
+
+    dt:
+      number,
+  ) {
+    const age =
+      performance.now() -
+      pose.timestamp
+
+    if (
+      !OCCLUSION.enabled ||
+      !Number.isFinite(age) ||
+      age < 0 ||
+      age >
+        OCCLUSION.staleMs ||
+      !garmentRoot.visible ||
+      garmentOpacity <=
+        TRACK.invisibleOpacity
+    ) {
+      hide()
+      return
+    }
+
+    const fit =
+      Math.min(
+        size.width /
+          pose.width,
+
+        size.height /
+          pose.height,
+      )
+
+    map.width =
+      size.width
+
+    map.height =
+      size.height
+
+    map.vw =
+      pose.width *
+      fit
+
+    map.vh =
+      pose.height *
+      fit
+
+    map.ox =
+      (
+        size.width -
+        map.vw
+      ) /
+      2
+
+    map.oy =
+      (
+        size.height -
+        map.vh
+      ) /
+      2
+
+    camera.getWorldPosition(
+      origin,
+    )
+
+    /**
+     * Project the two shoulders onto Z=0.
+     *
+     * Their world-space distance becomes our conservative
+     * body-size reference for arm radius and relative depth.
+     */
+    if (
+      !project(
+        pose.lx,
+        pose.ly,
+
+        0,
+
+        camera,
+        leftPlane,
+      ) ||
+      !project(
+        pose.rx,
+        pose.ry,
+
+        0,
+
+        camera,
+        rightPlane,
+      )
+    ) {
+      hide()
+      return
+    }
+
+    const planeSpan =
+      leftPlane.distanceTo(
+        rightPlane,
+      )
+
+    if (
+      !Number.isFinite(
+        planeSpan,
+      ) ||
+      planeSpan <= EPS
+    ) {
+      hide()
+      return
+    }
+
+    /**
+     * Arm occluders are world-space siblings of the garment.
+     *
+     * Do NOT parent them below the scaled garment root, otherwise
+     * they would receive the garment scale twice.
+     */
+    garmentRoot.updateWorldMatrix(
+      true,
+      false,
+    )
+
+    /**
+     * Fade the shadow intensity together with the current garment.
+     */
+    shadowMaterial.opacity =
+      OCCLUSION.shadowOpacity *
+      garmentOpacity
+
+    let anyVisible =
+      false
+
+    for (
+      const segment
+      of segments
+    ) {
+      const data =
+        getObservation(
+          pose,
+          segment,
+        )
+
+      const minConfidence =
+        segment.active
+          ? OCCLUSION.exitConfidence
+          : OCCLUSION.enterConfidence
+
+      const minFront =
+        segment.active
+          ? OCCLUSION.exitFront
+          : OCCLUSION.enterFront
+
+      if (!data) {
+        disable(
+          segment,
+        )
+
+        continue
+      }
+
+      /**
+       * At least one endpoint must be confidently in front.
+       *
+       * If a segment crosses the garment plane, the depth buffer
+       * itself decides which part is actually in front.
+       */
+      const frontSignal =
+        Math.max(
+          data.aFront,
+          data.bFront,
+        )
+
+      const depthMagnitude =
+        Math.max(
+          Math.abs(
+            data.aFront,
+          ),
+
+          Math.abs(
+            data.bFront,
+          ),
+        )
+
+      if (
+        data.confidence <
+          minConfidence ||
+        frontSignal <
+          minFront ||
+        depthMagnitude >
+          OCCLUSION.maxRelativeDepth ||
+        data.lengthRatio <
+          segment.config
+            .minLengthRatio ||
+        data.lengthRatio >
+          segment.config
+            .maxLengthRatio
+      ) {
+        disable(
+          segment,
+        )
+
+        continue
+      }
+
+      /**
+       * Count only NEW MediaPipe inference samples.
+       *
+       * R3F may render many times between pose frames.
+       */
+      if (
+        pose.timestamp !==
+        segment.lastTime
+      ) {
+        if (
+          pose.timestamp <
+            segment.lastTime ||
+          pose.timestamp -
+            segment.lastTime >
+            OCCLUSION.staleMs
+        ) {
+          disable(
+            segment,
+          )
+        }
+
+        if (
+          segment.samples ===
+          0
+        ) {
+          segment.goodSince =
+            pose.timestamp
+        }
+
+        segment.samples +=
+          1
+
+        segment.lastTime =
+          pose.timestamp
+
+        if (
+          !segment.active
+        ) {
+          segment.active =
+            segment.samples >=
+              OCCLUSION.reacquireSamples &&
+            pose.timestamp -
+              segment.goodSince >=
+              OCCLUSION.reacquireMs
+        }
+      }
+
+      if (
+        !segment.active
+      ) {
+        continue
+      }
+
+      /**
+       * Determine the world-space shoulder depth corresponding
+       * to this left/right side.
+       *
+       * Normalized garment shoulders:
+       *
+       * left  = +0.5
+       * right = -0.5
+       */
+      anchor
+        .set(
+          segment.shoulderX,
+          0,
+          0,
+        )
+        .applyMatrix4(
+          garmentRoot.matrixWorld,
+        )
+
+      const shoulderZ =
+        anchor.z
+
+      /**
+       * Convert relative MediaPipe depth into a SMALL bounded
+       * world-depth shift.
+       *
+       * Positive relative depth = closer to camera = +Z,
+       * because the camera is at positive Z looking toward zero.
+       */
+      const startDepthOffset =
+        THREE.MathUtils.clamp(
+          data.aFront *
+            OCCLUSION.depthGain,
+
+          -OCCLUSION.maxRetreat,
+          OCCLUSION.maxAdvance,
+        )
+
+      const endDepthOffset =
+        THREE.MathUtils.clamp(
+          data.bFront *
+            OCCLUSION.depthGain,
+
+          -OCCLUSION.maxRetreat,
+          OCCLUSION.maxAdvance,
+        )
+
+      const startZ =
+        shoulderZ +
+        planeSpan *
+          startDepthOffset
+
+      const endZ =
+        shoulderZ +
+        planeSpan *
+          endDepthOffset
+
+      /**
+       * Back-project each real MediaPipe endpoint onto its own
+       * estimated depth plane.
+       *
+       * This preserves exact 2D alignment before temporal smoothing.
+       */
+      if (
+        !project(
+          data.ax,
+          data.ay,
+
+          startZ,
+
+          camera,
+          rawStart,
+        ) ||
+        !project(
+          data.bx,
+          data.by,
+
+          endZ,
+
+          camera,
+          rawEnd,
+        )
+      ) {
+        disable(
+          segment,
+        )
+
+        continue
+      }
+
+      /**
+       * Crop the capsule along the anatomical segment.
+       *
+       * Upper arm:
+       *   keep shoulder portion under the virtual sleeve.
+       *
+       * Forearm:
+       *   use almost the entire elbow->wrist segment.
+       */
+      croppedStart
+        .lerpVectors(
+          rawStart,
+          rawEnd,
+
+          segment.config
+            .startFraction,
+        )
+
+      croppedEnd
+        .lerpVectors(
+          rawStart,
+          rawEnd,
+
+          segment.config
+            .endFraction,
+        )
+
+      const meanZ =
+        (
+          croppedStart.z +
+          croppedEnd.z
+        ) /
+        2
+
+      /**
+       * A radius defined at Z=0 must get smaller in world units
+       * as it moves toward the PerspectiveCamera in order to keep
+       * approximately the same projected pixel thickness.
+       */
+      const radius =
+        planeSpan *
+        segment.config
+          .radiusRatio *
+        (
+          origin.z -
+          meanZ
+        ) /
+        origin.z
+
+      if (
+        !Number.isFinite(
+          radius,
+        ) ||
+        radius <= EPS ||
+        Math.max(
+          Math.abs(
+            croppedStart.z,
+          ),
+
+          Math.abs(
+            croppedEnd.z,
+          ),
+        ) +
+          radius >
+          origin.z *
+            OCCLUSION.maxDepthFraction
+      ) {
+        disable(
+          segment,
+        )
+
+        continue
+      }
+
+      const blend =
+        1 -
+        Math.exp(
+          -OCCLUSION.smoothingRate *
+          dt,
+        )
+
+      if (
+        !segment.placed
+      ) {
+        segment.start.copy(
+          croppedStart,
+        )
+
+        segment.end.copy(
+          croppedEnd,
+        )
+
+        segment.radius =
+          radius
+
+        segment.placed =
+          true
+      } else {
+        segment.start.lerp(
+          croppedStart,
+          blend,
+        )
+
+        segment.end.lerp(
+          croppedEnd,
+          blend,
+        )
+
+        segment.radius =
+          THREE.MathUtils.lerp(
+            segment.radius,
+            radius,
+            blend,
+          )
+      }
+
+      segment.strength +=
+        (
+          1 -
+          segment.strength
+        ) *
+        (
+          1 -
+          Math.exp(
+            -OCCLUSION.revealRate *
+            dt,
+          )
+        )
+
+      /**
+       * A depth-only material cannot be alpha-faded.
+       *
+       * Instead:
+       *
+       * - garment fade controls the proxy radius
+       * - shadow opacity separately follows garmentOpacity
+       */
+      const effectiveRadius =
+        segment.radius *
+        Math.sqrt(
+          segment.strength *
+          garmentOpacity,
+        )
+
+      if (
+        !applyCapsuleTransform(
+          segment,
+          effectiveRadius,
+        )
+      ) {
+        segment.group.visible =
+          false
+
+        continue
+      }
+
+      segment.group.visible =
+        true
+
+      anyVisible =
+        true
+    }
+
+    root.visible =
+      anyVisible
+  }
+
+  function dispose() {
+    hide()
+
+    cylinder.dispose()
+    sphere.dispose()
+
+    depthMaterial.dispose()
+    shadowMaterial.dispose()
+  }
+
+  return {
+    root,
+    update,
+    hide,
+    dispose,
+  }
+}
+
+function GarmentModel({
+  modelUrl,
+  targetRef,
+  onReady,
+}: {
+  modelUrl: string
+
+  targetRef:
+    RefObject<Target>
+
+  onReady:
+    () => void
+}) {
+  const { scene } =
+    useGLTF(
+      modelUrl,
+    )
+
+  const instance =
+    useMemo(
+      () => ({
+        ...buildModel(
+          scene,
+        ),
+
+        occluders:
+          createArmOccluders(),
+      }),
+
+      [scene],
+    )
+
+  const instanceRef =
+    useRef(
+      instance,
+    )
+
+  const scratchRef =
+    useRef({
+      origin:
+        new THREE.Vector3(),
+
+      direction:
+        new THREE.Vector3(),
+
+      left:
+        new THREE.Vector3(),
+
+      right:
+        new THREE.Vector3(),
+
+      corner:
+        new THREE.Vector3(),
+
+      position:
+        new THREE.Vector3(),
+
+      rotation:
+        new THREE.Quaternion(),
+
+      scale:
+        new THREE.Vector3(),
+
+      euler:
+        new THREE.Euler(
+          0,
+          0,
+          0,
+          'ZYX',
+        ),
+
+      ray:
+        new THREE.Raycaster(),
+
+      ndc:
+        new THREE.Vector2(),
+
+      plane:
+        new THREE.Plane(
+          new THREE.Vector3(
+            0,
+            0,
+            1,
+          ),
+          0,
+        ),
+    })
+
+  useEffect(() => {
+    instanceRef.current =
+      instance
+
+    onReady()
+
+    return () => {
+      for (
+        const {
+          material,
+        } of instance.materials
+      ) {
+        material.dispose()
+      }
+
+      for (
+        const skeleton
+        of instance.skeletons
+      ) {
+        skeleton.dispose()
+      }
+
+      instance.occluders.dispose()
+
+      /**
+       * Shared geometry/textures still belong to useGLTF cache.
+       */
+    }
+  }, [
+    instance,
+    onReady,
+  ])
+
+  useFrame(
+    (
+      {
+        camera,
+        size,
+      },
+
+      delta,
+    ) => {
+      const item =
+        instanceRef.current
+
+      const s =
+        scratchRef.current
+
+      const object =
+        item.root
+
+      const dt =
+        Number.isFinite(
+          delta,
+        )
+          ? Math.max(
+              0,
+              delta,
+            )
+          : 0
+
+      const blend =
+        1 -
+        Math.exp(
+          -TRACK.smoothingRate *
+          dt,
+        )
+
+      const target =
+        targetRef.current
+
+      const pose =
+        target.pose
+
+      let wantedOpacity =
+        0
+
+      let fitAccepted =
+        false
+
+      camera.updateMatrixWorld()
+
+      camera.getWorldPosition(
+        s.origin,
+      )
+
+      camera.getWorldDirection(
+        s.direction,
+      )
+
+      /**
+       * Current fitting model assumes:
+       *
+       * - PerspectiveCamera
+       * - camera parallel to world Z=0
+       */
+      const cameraOK =
+        camera instanceof
+          THREE.PerspectiveCamera &&
+        s.origin.z > 0 &&
+        Math.abs(
+          s.direction.x,
+        ) < 1e-6 &&
+        Math.abs(
+          s.direction.y,
+        ) < 1e-6 &&
+        s.direction.z < 0
+
+      const age =
+        pose
+          ? performance.now() -
+            pose.timestamp
+          : Infinity
+
+      if (
+        !document.hidden &&
+        pose &&
+        age >= 0 &&
+        age <
+          TRACK.staleMs &&
+        cameraOK &&
+        size.width > 0 &&
+        size.height > 0
+      ) {
+        const fit =
+          Math.min(
+            size.width /
+              pose.width,
+
+            size.height /
+              pose.height,
+          )
+
+        const vw =
+          pose.width *
+          fit
+
+        const vh =
+          pose.height *
+          fit
+
+        const ox =
+          (
+            size.width -
+            vw
+          ) /
+          2
+
+        const oy =
+          (
+            size.height -
+            vh
+          ) /
+          2
+
+        /**
+         * Left shoulder:
+         *
+         * CSS pixels
+         * -> NDC
+         * -> camera ray
+         * -> Z=0
+         */
+        s.ndc.set(
+          2 *
+            (
+              ox +
+              pose.lx *
+                vw
+            ) /
+            size.width -
+            1,
+
+          1 -
+            2 *
+            (
+              oy +
+              pose.ly *
+                vh
+            ) /
+            size.height,
+        )
+
+        s.ray.setFromCamera(
+          s.ndc,
+          camera,
+        )
+
+        const hitLeft =
+          s.ray.ray
+            .intersectPlane(
+              s.plane,
+              s.left,
+            )
+
+        /**
+         * Right shoulder.
+         */
+        s.ndc.set(
+          2 *
+            (
+              ox +
+              pose.rx *
+                vw
+            ) /
+            size.width -
+            1,
+
+          1 -
+            2 *
+            (
+              oy +
+              pose.ry *
+                vh
+            ) /
+            size.height,
+        )
+
+        s.ray.setFromCamera(
+          s.ndc,
+          camera,
+        )
+
+        const hitRight =
+          s.ray.ray
+            .intersectPlane(
+              s.plane,
+              s.right,
+            )
+
+        const result =
+          hitLeft &&
+          hitRight
+            ? solveFit(
+                s.left.x -
+                  s.origin.x,
+
+                s.left.y -
+                  s.origin.y,
+
+                s.right.x -
+                  s.origin.x,
+
+                s.right.y -
+                  s.origin.y,
+
+                s.origin.z,
+
+                pose.yaw,
+              )
+            : null
+
+        if (result) {
+          s.position.set(
+            result.x +
+              s.origin.x,
+
+            result.y +
+              s.origin.y,
+
+            0,
+          )
+
+          s.rotation
+            .setFromEuler(
+              s.euler.set(
+                0,
+
+                result.yaw,
+
+                result.roll,
+
+                'ZYX',
+              ),
+            )
+
+          s.scale.setScalar(
+            result.scale,
+          )
+
+          /**
+           * Check full garment depth rather than only the shoulder plane.
+           */
+          let safe =
+            true
+
+          for (
+            const corner
+            of item.corners
+          ) {
+            const z =
+              s.corner
+                .copy(
+                  corner,
+                )
+                .applyQuaternion(
+                  s.rotation,
+                )
+                .multiplyScalar(
+                  result.scale,
+                )
+                .z
+
+            if (
+              !Number.isFinite(z) ||
+              Math.abs(z) >
+                s.origin.z *
+                  TRACK.maxDepthFraction
+            ) {
+              safe =
+                false
+
+              break
+            }
+          }
+
+          if (safe) {
+            if (
+              !item.placed ||
+              item.alpha <=
+                TRACK.invisibleOpacity
+            ) {
+              object.position.copy(
+                s.position,
+              )
+
+              object.quaternion.copy(
+                s.rotation,
+              )
+
+              object.scale.copy(
+                s.scale,
+              )
+
+              item.placed =
+                true
+            } else {
+              object.position.lerp(
+                s.position,
+                blend,
+              )
+
+              object.quaternion.slerp(
+                s.rotation,
+                blend,
+              )
+
+              object.scale.lerp(
+                s.scale,
+                blend,
+              )
+            }
+
+            wantedOpacity =
+              target.opacity
+
+            fitAccepted =
+              true
+          }
+        }
+      }
+
+      /**
+       * Invalid pose:
+       *
+       * never move the garment to unstable coordinates.
+       *
+       * Fade at its last stable placement.
+       */
+      const fadeRate =
+        wantedOpacity >
+        item.alpha
+          ? TRACK.fadeInRate
+          : TRACK.fadeOutRate
+
+      item.alpha +=
+        (
+          wantedOpacity -
+          item.alpha
+        ) *
+        (
+          1 -
+          Math.exp(
+            -fadeRate *
+            dt,
+          )
+        )
+
+      if (
+        document.hidden ||
+        (
+          wantedOpacity ===
+            0 &&
+          item.alpha <
+            TRACK.invisibleOpacity
+        )
+      ) {
+        item.alpha =
+          0
+      }
+
+      if (
+        wantedOpacity ===
+          1 &&
+        item.alpha >
+          0.999
+      ) {
+        item.alpha =
+          1
+      }
+
+      object.visible =
+        item.placed &&
+        item.alpha > 0
+
+      const fading =
+        item.alpha < 1
+
+      for (
+        const entry
+        of item.materials
+      ) {
+        const transparent =
+          fading ||
+          entry.transparent
+
+        if (
+          entry.material
+            .transparent !==
+          transparent
+        ) {
+          // eslint-disable-next-line react-hooks/immutability -- This is an instance-owned Three.js material clone, updated imperatively by useFrame; not React state or a cached GLTF material.
+          entry.material.transparent = transparent
+
+          entry.material.needsUpdate =
+            true
+        }
+
+        entry.material.opacity =
+          entry.opacity *
+          item.alpha
+
+        entry.material.alphaTest =
+          entry.alphaTest *
+          Math.max(
+            item.alpha,
+            EPS,
+          )
+
+        entry.material.depthWrite =
+          !fading &&
+          entry.depthWrite
+      }
+
+      /**
+       * Shadow map caster control.
+       *
+       * The shadow receiver itself is faded by item.alpha.
+       */
+      const castsShadow =
+        object.visible &&
+        item.alpha >
+          TRACK.invisibleOpacity
+
+      for (
+        const mesh
+        of item.shadowCasters
+      ) {
+        mesh.castShadow =
+          castsShadow
+      }
+
+      /**
+       * Occlusion is a READ-ONLY consumer of the accepted garment fit.
+       *
+       * It never modifies:
+       *
+       * - solveFit
+       * - garment scale
+       * - garment position
+       * - garment rotation
+       * - garment tracking/fade
+       */
+      if (
+        fitAccepted &&
+        pose &&
+        camera instanceof
+          THREE.PerspectiveCamera &&
+        wantedOpacity > 0
+      ) {
+        item.occluders.update(
+          pose,
+
+          camera,
+
+          size,
+
+          object,
+
+          item.alpha,
+
+          dt,
+        )
+      } else {
+        /**
+         * Never leave stale invisible depth masks in the scene.
+         */
+        item.occluders.hide()
+      }
+    },
+  )
+
+  return (
+    <>
+      {/*
+       * Arm depth/shadow proxy must be a world-space sibling,
+       * not a child of the scaled garment root.
+       */}
+      <primitive
+        object={
+          instance.occluders.root
+        }
+        dispose={null}
+      />
+
+      <primitive
+        object={
+          instance.root
+        }
+        dispose={null}
+      />
+    </>
+  )
+}
+
+class ModelErrorBoundary extends Component<
+  { children: ReactNode; onError: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  render() {
+    // Notify from a passive effect after the parent has committed requestKey.
+    // componentDidCatch can run before the parent's layout effect on a switch.
+    return this.state.failed
+      ? <WebGLFallback onError={this.props.onError} />
+      : this.props.children
+  }
+}
+
+function WebGLFallback({
+  onError,
+}: {
+  onError:
+    () => void
+}) {
+  useEffect(
+    onError,
+    [onError],
+  )
+
+  return null
+}
+
+export function GarmentOverlay({
+  source,
+  garment,
+  mirrored,
+}: {
+  source: PoseSource
+  garment: Garment
+  mirrored: boolean
+}) {
+  const targetRef = useRef<Target>({ pose: null, opacity: 0 })
+  const [tracking, setTracking] = useState<TrackingState>('searching')
+  const [attempt, setAttempt] = useState(0)
+
+  // Explicit URLs are never replaced after a load failure. Only legacy entries
+  // without modelUrl use the default. The same URL shares the GLTF load cache.
+  const modelUrl = garment.modelUrl ?? DEFAULT_GARMENT_MODEL_URL
+  const requestKey = JSON.stringify([garment.id, modelUrl, attempt])
+
+  const [assetStatus, setAssetStatus] = useState<{
+    key: string
+    state: ModelState
+  }>({ key: '', state: 'loading' })
+
+  // Never read or write this ref during render. It identifies the committed
+  // selection, so callbacks belonging to an older selection cannot change UI.
+  const activeRequestRef = useRef<string | null>(requestKey)
+  useLayoutEffect(() => {
+    activeRequestRef.current = requestKey
+    return () => {
+      if (activeRequestRef.current === requestKey) {
+        activeRequestRef.current = null
+      }
+    }
+  }, [requestKey])
+
+  const onReady = useCallback(() => {
+    if (activeRequestRef.current === requestKey) {
+      setAssetStatus({ key: requestKey, state: 'ready' })
+    }
+  }, [requestKey])
+
+  const onError = useCallback(() => {
+    if (activeRequestRef.current === requestKey) {
+      setAssetStatus({ key: requestKey, state: 'error' })
+    }
+  }, [requestKey])
+
+  // Reset the displayed status immediately when id/URL/attempt changes,
+  // without a setState-in-effect or an incorrect one-frame "ready" message.
+  const modelState = assetStatus.key === requestKey
+    ? assetStatus.state
+    : 'loading'
+
+  // Garment changes do NOT resubscribe or restart the shared pose session.
+  useEffect(() => {
+    let reported: TrackingState | undefined
+    const tracker = createTracker((target, state) => {
+      targetRef.current = target
+      if (reported !== state) {
+        reported = state
+        setTracking(state)
+      }
+    })
+    tracker.reset()
+    const unsubscribe = source.subscribe(tracker.push)
+    const onVisibility = () => {
+      if (document.hidden) tracker.reset()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      unsubscribe()
+      tracker.dispose()
+      targetRef.current = { pose: null, opacity: 0 }
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [source])
+
+  function retry() {
+    // Clear ONLY the selected GLB's cached result/error, not the entire cache.
+    useGLTF.clear(modelUrl)
+    // Explicit retry may also recreate Canvas, recovering its outer boundary.
+    // Ordinary garment selection leaves Canvas and its WebGL context mounted.
+    setAttempt((value) => value + 1)
+  }
+
+  const message = modelState === 'error'
+    ? `${garment.name}の3Dモデルを表示できません。GLBの配置とWebGLを確認してください。`
+    : modelState === 'loading'
+      ? '3Dモデルを読み込んでいます…'
+      : tracking === 'tracking'
+        ? `${garment.name} · 3D試着中`
+        : tracking === 'turning'
+          ? '正面に戻ると試着を再開します'
+          : '両肩を映し、少し静止してください'
+
+  return (
+    <>
+      <div
+        className="pose-canvas garment-canvas"
+        aria-label="試着する服"
+        data-model-url={modelUrl}
+      >
+        <ModelErrorBoundary key={attempt} onError={onError}>
+          <Canvas
+            shadows
+            camera={{ position: [0, 0, CAMERA_Z], fov: CAMERA_FOV, near: 0.1, far: 100 }}
+            gl={{ alpha: true, antialias: true }}
+            fallback={<WebGLFallback onError={onError} />}
+          >
+            <ambientLight intensity={1} />
+            <directionalLight position={[0, 0, 5]} intensity={1.5} />
+            <directionalLight
+              position={[-5, 5, 2]}
+              intensity={0.5}
+              castShadow
+              shadow-mapSize-width={1024}
+              shadow-mapSize-height={1024}
+              shadow-camera-near={0.1}
+              shadow-camera-far={20}
+              shadow-camera-left={-6}
+              shadow-camera-right={6}
+              shadow-camera-top={6}
+              shadow-camera-bottom={-6}
+              shadow-bias={-0.0003}
+              shadow-normalBias={0.02}
+            />
+            {/* Reset only the selected model and its owned arm/shadow proxies.
+                This also resets a previous asset's error boundary on swipe. */}
+            <ModelErrorBoundary key={requestKey} onError={onError}>
+              <Suspense fallback={null}>
+                <GarmentModel
+                  modelUrl={modelUrl}
+                  targetRef={targetRef}
+                  onReady={onReady}
+                />
+              </Suspense>
+            </ModelErrorBoundary>
+          </Canvas>
+        </ModelErrorBoundary>
+      </div>
+      <div className={`garment-feedback ${mirrored ? 'is-mirrored' : ''}`}>
+        <p
+          className="pose-message"
+          role="status"
+          style={{
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+            whiteSpace: 'normal',
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {message}
+        </p>
+        {modelState === 'error' && (
+          <button type="button" className="pose-retry" onClick={retry}>
+            3Dモデルを再読み込み
+          </button>
+        )}
+      </div>
+    </>
+  )
 }
 </file>
 
@@ -4444,10 +7997,16 @@ export const garmentGenderLabels: Record<GarmentGender, string> = {
   unisex: '男女共用',
 }
 
+/** Default for legacy 2D fixtures and the only GLB listed in the supplied repo. */
+export const DEFAULT_GARMENT_MODEL_URL =
+  `${import.meta.env.BASE_URL}garments/tshirt.glb`
+
 export interface Garment {
   id: string
   name: string
   image: string
+  /** GLB URL, already resolved against BASE_URL. PNG remains the thumbnail. */
+  modelUrl?: string
   gender: GarmentGender
   category: 'tshirt' | 'shirt' | 'jacket'
   /** Anatomical left/right of the wearer; front-view left is image-right. */
@@ -4480,6 +8039,9 @@ export const demoGarment: Garment = {
   id: 'tshirt-gray',
   name: 'Tシャツ / Heather Gray',
   image: `${import.meta.env.BASE_URL}garments/tshirt-gray.png`,
+  // Replace this URL only after adding the actual model file.
+  // Example: `${import.meta.env.BASE_URL}garments/tshirt-gray.glb`
+  modelUrl: DEFAULT_GARMENT_MODEL_URL,
   gender: 'unisex',
   category: 'tshirt',
   anchors: {
@@ -4505,6 +8067,9 @@ export const garments: readonly Garment[] = [
     id: 'tshirt-mint',
     name: 'Tシャツ / Mint Green',
     image: `${import.meta.env.BASE_URL}garments/tshirt-mint.png`,
+    // Replace this URL only after adding the actual model file.
+    // Example: `${import.meta.env.BASE_URL}garments/tshirt-mint.glb`
+    modelUrl: DEFAULT_GARMENT_MODEL_URL,
     gender: 'men',
     category: 'tshirt',
     anchors: {
@@ -4523,6 +8088,9 @@ export const garments: readonly Garment[] = [
     id: 'tshirt-red',
     name: 'Tシャツ / Red',
     image: `${import.meta.env.BASE_URL}garments/tshirt-red.png`,
+    // Replace this URL only after adding the actual model file.
+    // Example: `${import.meta.env.BASE_URL}garments/tshirt-red.glb`
+    modelUrl: DEFAULT_GARMENT_MODEL_URL,
     gender: 'women',
     category: 'tshirt',
     anchors: {
