@@ -12,6 +12,18 @@ export type GarmentCategory =
   | 'jacket'
   | 'bottoms'
   | 'onepiece'
+export type GarmentSlot = 'tops' | 'bottoms' | 'onepiece'
+
+export const garmentSlotLabels: Record<GarmentSlot, string> = {
+  tops: 'トップス',
+  bottoms: 'ボトムス',
+  onepiece: 'ワンピース',
+}
+
+export function getGarmentSlot(category: GarmentCategory): GarmentSlot {
+  return category === 'bottoms' ? 'bottoms' : category === 'onepiece' ? 'onepiece' : 'tops'
+}
+
 export type OcclusionSegment = 'upper' | 'forearm' | 'thigh' | 'shin'
 
 export interface Garment3DFit {
@@ -23,6 +35,21 @@ export interface Garment3DFit {
   anchorDepth?: number
   /** Onepiece only; requires both GLB hip markers. Otherwise uniform fit. */
   fitTorsoLength?: boolean
+
+  /** Visual adjustments AFTER anchor normalization, BEFORE body tracking.
+   * Defaults: scale/scaleX/scaleY/scaleZ=1; offsets=0.
+   * These never change the anatomical tracking root or occluder placement.
+   */
+  scale?: number
+  scaleX?: number
+  scaleY?: number
+  scaleZ?: number
+  /** Offsets in normalized primary anchor-width units (not pixels/meters).
+   * +X: wearer's left; +Y: up; +Z: garment front. Mirroring remains external.
+   */
+  offsetX?: number
+  offsetY?: number
+  offsetZ?: number
 }
 
 export interface OcclusionOverride {
@@ -125,6 +152,11 @@ export const garments: readonly Garment[] = [
     modelUrl: `${base}garments/pants.glb`,
     gender: 'unisex',
     category: 'bottoms',
+    fit3D: {
+      scaleX: 1.5,
+      scaleY: 2.8,
+      offsetY: 0.1,
+    },
   },
   {
     ...legacy2D,
@@ -134,6 +166,11 @@ export const garments: readonly Garment[] = [
     modelUrl: `${base}garments/skirt.glb`,
     gender: 'unisex',
     category: 'bottoms',
+    fit3D: {
+      scaleX: 1.5,
+      scaleY: 2.8,
+      offsetY: 0.1,
+    },
   },
   {
     ...legacy2D,
@@ -143,6 +180,11 @@ export const garments: readonly Garment[] = [
     modelUrl: `${base}garments/dress.glb`,
     gender: 'unisex',
     category: 'onepiece',
-    fit3D: { fitTorsoLength: true },
+    // fit3D: { fitTorsoLength: true },
+    fit3D: {
+      scaleX: 1.5,
+      scaleY: 1.8,
+      offsetY: 0.1,
+    },
   },
 ]

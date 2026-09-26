@@ -1,51 +1,29 @@
 import { StrictMode } from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Garment } from '../wardrobe/garments'
 import { CameraView } from './CameraView'
 import { startPoseSession } from '../pose/poseSession'
 import { makeSwipeFrame } from '../../test/swipeFixture'
-import * as wardrobe from '../wardrobe/garments'
 
-
-// A stable three-product fixture for camera/gesture behavior; the real
-// five-product catalog is covered by garments.test.ts and switching tests.
 vi.mock('../wardrobe/garments', async (importOriginal) => {
   const original = await importOriginal<typeof import('../wardrobe/garments')>()
-  return {
-    ...original,
-    garments: [
-      { ...original.demoGarment, id: 'tshirt-gray', name: 'Tシャツ / Heather Gray', gender: 'unisex' as const },
-      { ...original.demoGarment, id: 'tshirt-mint', name: 'Tシャツ / Mint Green', gender: 'men' as const },
-      { ...original.demoGarment, id: 'tshirt-red', name: 'Tシャツ / Red', gender: 'women' as const },
-    ],
-  }
+  return { ...original, garments: [
+    { ...original.demoGarment, id: 'top-a', name: 'Top A', category: 'tshirt', gender: 'unisex' },
+    { ...original.demoGarment, id: 'top-b', name: 'Top B', category: 'shirt', gender: 'men' },
+    { ...original.demoGarment, id: 'pants', name: 'Pants', category: 'bottoms', gender: 'unisex' },
+    { ...original.demoGarment, id: 'skirt', name: 'Skirt', category: 'bottoms', gender: 'women' },
+    { ...original.demoGarment, id: 'dress', name: 'Dress', category: 'onepiece', gender: 'women' },
+  ] }
 })
-
 vi.mock('../pose/poseSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../pose/poseSession')>()),
   startPoseSession: vi.fn(() => vi.fn()),
 }))
-
-/**
- * CameraView integration tests verify:
- * - camera lifecycle
- * - garment filtering/selection
- * - swipe integration
- * - shared PoseSession lifecycle
- *
- * They must not depend on WebGL, ResizeObserver, GLB loading or R3F rendering.
- * GarmentOverlay has its own dedicated tests for those responsibilities.
- *
- * Keep VirtualMirror real so SwipeGesture and the shared PoseSource remain
- * covered by these integration tests.
- */
 vi.mock('../virtualTryOn/GarmentOverlay', () => ({
-  GarmentOverlay: ({ garment }: { garment: { name: string } }) => (
-    <div
-      aria-label="試着する服"
-      data-testid="garment-overlay-test-double"
-    >
-      <p role="status">{garment.name} · 試着中</p>
+  GarmentOverlay: ({ garments }: { garments: readonly Garment[] }) => (
+    <div aria-label="試着する服" data-testid="outfit-renderer">
+      {garments.map(item => <span key={item.id} data-testid="worn-garment">{item.name}</span>)}
     </div>
   ),
 }))
@@ -53,430 +31,127 @@ vi.mock('../virtualTryOn/GarmentOverlay', () => ({
 function fakeStream() {
   const track = { stop: vi.fn(), onended: null as (() => void) | null }
   const stream = {
-    getTracks: () => [track],
-    getVideoTracks: () => [track],
+    getTracks: () => [track], getVideoTracks: () => [track],
   } as unknown as MediaStream
-
   return { stream, track }
 }
-
 const getUserMedia = vi.fn()
-
 async function getPosePublisher() {
-  await waitFor(() => {
-    expect(startPoseSession).toHaveBeenCalled()
-  })
-
+  await waitFor(() => expect(startPoseSession).toHaveBeenCalled())
   const call = vi.mocked(startPoseSession).mock.calls.at(-1)
-
-  if (!call) {
-    throw new Error('startPoseSession was not started')
-  }
-
+  if (!call) throw new Error('Missing pose session')
   return call[1].onFrame
+}
+function tab(name: string) { fireEvent.click(screen.getByRole('tab', { name })) }
+function choose(name: string) { fireEvent.click(screen.getByRole('button', { name: `${name}を選ぶ` })) }
+function worn() { return screen.queryAllByTestId('worn-garment').map(node => node.textContent) }
+async function start() {
+  getUserMedia.mockResolvedValue(fakeStream().stream)
+  render(<CameraView />)
+  fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+  await screen.findByRole('button', { name: 'カメラを停止' })
+  return getPosePublisher()
 }
 
 beforeEach(() => {
   getUserMedia.mockReset()
-
+  vi.mocked(startPoseSession).mockClear()
   vi.stubGlobal('isSecureContext', true)
-
-  vi.stubGlobal('navigator', {
-    mediaDevices: {
-      getUserMedia,
-    },
-  })
-
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
-
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-    clearRect: vi.fn(),
-    save: vi.fn(),
-    restore: vi.fn(),
-    setTransform: vi.fn(),
-    drawImage: vi.fn(),
-  } as unknown as CanvasRenderingContext2D)
-
-  vi.stubGlobal(
-    'Image',
-    class {
-      src = ''
-      naturalWidth = 800
-      naturalHeight = 800
-      decode = vi.fn().mockResolvedValue(undefined)
-    },
-  )
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect: vi.fn() } as unknown as CanvasRenderingContext2D)
 })
-
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 describe('CameraView', () => {
-  it('cycles all three garments with buttons and selects thumbnails without starting the camera', () => {
+  it('browses only focused candidates without opening the camera', () => {
     render(<CameraView />)
-
-    expect(screen.getByRole('radio', { name: '全て' })).toBeChecked()
-    expect(screen.getByText('1 / 3')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '前の服' }))
-    expect(screen.getByText('3 / 3')).toBeInTheDocument()
-
+    expect(screen.getByRole('tab', { name: 'トップス' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pantsを選ぶ' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '次の服' }))
-    expect(screen.getByText('1 / 3')).toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Tシャツ / Mint Greenを選ぶ',
-      }),
-    )
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Tシャツ / Mint Greenを選ぶ',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
     expect(getUserMedia).not.toHaveBeenCalled()
   })
 
-  it('filters thumbnails and buttons, keeping a matching selection or choosing the first match', () => {
-    render(<CameraView />)
-
-    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
-
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    expect(screen.getByText('男女共用')).toBeInTheDocument()
-
-    expect(
-      screen.queryByRole('button', {
-        name: 'Tシャツ / Redを選ぶ',
-      }),
-    ).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '前の服' }))
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Tシャツ / Mint Greenを選ぶ',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-
-    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Tシャツ / Mint Greenを選ぶ',
-      }),
-    )
-
-    fireEvent.click(screen.getByRole('radio', { name: '全て' }))
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
-    expect(screen.getByText('男性向け')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
-
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    expect(screen.getByText('男女共用')).toBeInTheDocument()
-
-    expect(
-      screen.queryByRole('button', {
-        name: 'Tシャツ / Mint Greenを選ぶ',
-      }),
-    ).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
-
-    expect(screen.getByText('女性向け')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('radio', { name: '全て' }))
-
-    expect(screen.getByText('3 / 3')).toBeInTheDocument()
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Tシャツ / Redを選ぶ',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-
-    expect(getUserMedia).not.toHaveBeenCalled()
-  })
-
-  it('cycles only matching garments by swipe in both directions without changing category or restarting inference', async () => {
-    getUserMedia.mockResolvedValue(fakeStream().stream)
-
-    render(<CameraView />)
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'カメラを起動',
-      }),
-    )
-
-    await screen.findByRole('button', {
-      name: 'カメラを停止',
-    })
-
-    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
-
-    const publish = await getPosePublisher()
-
-    const swipe = (time: number, xs: number[]) =>
-      act(() => {
-        publish(null)
-
-        // Hold before each new swipe to re-arm the existing cooldown detector.
-        if (time > 0) {
-          for (const offset of [-320, -240, -160, -80]) {
-            publish(makeSwipeFrame(time + offset, xs[0]))
-          }
-        }
-
-        xs.forEach((x, i) => {
-          publish(makeSwipeFrame(time + i * 80, x))
-        })
-      })
-
-    swipe(0, [-0.5, -0.2, 0.1, 0.4])
-
-    expect(screen.getByText('2 / 2')).toBeInTheDocument()
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Tシャツ / Redを選ぶ',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-
-    expect(
-      await screen.findByText('Tシャツ / Red · 試着中'),
-    ).toBeInTheDocument()
-
-    swipe(1600, [-0.5, -0.2, 0.1, 0.4])
-
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
-
-    expect(
-      await screen.findByText('Tシャツ / Heather Gray · 試着中'),
-    ).toBeInTheDocument()
-
-    swipe(3200, [0.4, 0.1, -0.2, -0.5])
-
-    expect(screen.getByText('2 / 2')).toBeInTheDocument()
-
-    expect(screen.getByRole('radio', { name: '女性' })).toBeChecked()
-
-    expect(
-      screen.queryByRole('button', {
-        name: 'Tシャツ / Mint Greenを選ぶ',
-      }),
-    ).not.toBeInTheDocument()
-
-    expect(getUserMedia).toHaveBeenCalledOnce()
-    expect(startPoseSession).toHaveBeenCalledOnce()
-  })
-
-  it('discards partial swipes when changing category', async () => {
-    getUserMedia.mockResolvedValue(fakeStream().stream)
-
-    render(<CameraView />)
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'カメラを起動',
-      }),
-    )
-
-    await screen.findByRole('button', {
-      name: 'カメラを停止',
-    })
-
-    const publish = await getPosePublisher()
-
-    act(() =>
-      [-0.5, -0.2, 0.1].forEach((x, i) => {
-        publish(makeSwipeFrame(i * 80, x))
-      }),
-    )
-
-    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
-
-    act(() => {
-      publish(makeSwipeFrame(240, 0.4))
-    })
-
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
-
-    act(() =>
-      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => {
-        publish(makeSwipeFrame(1600 + i * 80, x))
-      }),
-    )
-
-    expect(screen.getByText('2 / 2')).toBeInTheDocument()
-    expect(startPoseSession).toHaveBeenCalledOnce()
-  })
-
-  it('removes the previous overlay for an empty category and recovers without restarting inference', async () => {
-    const originalFilter = wardrobe.filterGarments
-
-    vi.spyOn(wardrobe, 'filterGarments').mockImplementation(
-      (catalog, filter) =>
-        filter === 'men' ? [] : originalFilter(catalog, filter),
-    )
-
-    getUserMedia.mockResolvedValue(fakeStream().stream)
-
-    render(<CameraView />)
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'カメラを起動',
-      }),
-    )
-
-    await screen.findByRole('button', {
-      name: 'カメラを停止',
-    })
-
-    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
-
-    expect(
-      screen.getByText(/このカテゴリの服はまだありません/),
-    ).toBeInTheDocument()
-
-    expect(
-      screen.queryByLabelText('試着する服'),
-    ).not.toBeInTheDocument()
-
-    expect(
-      screen.getByRole('checkbox', {
-        name: '手のスワイプで切り替え',
-      }),
-    ).toBeDisabled()
-
-    fireEvent.click(screen.getByRole('radio', { name: '全て' }))
-
-    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
-    expect(screen.getByText('1 / 3')).toBeInTheDocument()
-
+  it('keeps tops and bottoms independent and does not equip by merely focusing a tab', async () => {
+    await start()
+    expect(worn()).toEqual(['Top A'])
+    tab('ボトムス')
+    expect(worn()).toEqual(['Top A'])
+    choose('Pants')
+    expect(worn()).toEqual(['Top A', 'Pants'])
+    choose('Skirt')
+    expect(worn()).toEqual(['Top A', 'Skirt'])
+    tab('トップス')
+    choose('Top B')
+    expect(worn()).toEqual(['Top B', 'Skirt'])
     expect(startPoseSession).toHaveBeenCalledOnce()
     expect(getUserMedia).toHaveBeenCalledOnce()
   })
 
-  it('switches once from shared wrist frames without restarting inference, and honors gesture OFF', async () => {
-    getUserMedia.mockResolvedValue(fakeStream().stream)
-
-    render(<CameraView />)
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'カメラを起動',
-      }),
-    )
-
-    await screen.findByRole('button', {
-      name: 'カメラを停止',
-    })
-
-    const publish = await getPosePublisher()
-
-    act(() =>
-      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => {
-        publish(makeSwipeFrame(i * 80, x))
-      }),
-    )
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
-    expect(screen.getByText(/← 次の服へ/)).toBeInTheDocument()
-
-    act(() =>
-      [0.4, 0.1, -0.2, -0.5].forEach((x, i) => {
-        publish(makeSwipeFrame(320 + i * 80, x))
-      }),
-    )
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByRole('checkbox', {
-        name: '手のスワイプで切り替え',
-      }),
-    )
-
-    act(() =>
-      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => {
-        publish(makeSwipeFrame(1600 + i * 80, x))
-      }),
-    )
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+  it('makes onepiece exclusive and leaves it on until another garment is selected', async () => {
+    await start()
+    tab('ボトムス'); choose('Pants')
+    tab('ワンピース')
+    expect(worn()).toEqual(['Top A', 'Pants'])
+    choose('Dress')
+    expect(worn()).toEqual(['Dress'])
+    tab('トップス')
+    expect(worn()).toEqual(['Dress'])
+    choose('Top A')
+    expect(worn()).toEqual(['Top A'])
     expect(startPoseSession).toHaveBeenCalledOnce()
-    expect(screen.getByLabelText('試着する服')).toBeInTheDocument()
   })
 
-  it('clears partial swipes on manual selection and mirror changes', async () => {
-    getUserMedia.mockResolvedValue(fakeStream().stream)
+  it('filters browsing candidates without undressing an already worn item', async () => {
+    await start()
+    choose('Top B')
+    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
+    expect(worn()).toEqual(['Top B'])
+    expect(screen.queryByRole('button', { name: 'Top Bを選ぶ' })).not.toBeInTheDocument()
+    choose('Top A')
+    expect(worn()).toEqual(['Top A'])
+    tab('ワンピース')
+    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
+    expect(screen.getByText(/このカテゴリの服はまだありません/)).toBeInTheDocument()
+    expect(worn()).toEqual(['Top A'])
+  })
 
-    render(<CameraView />)
+  it('routes real swipes to the currently focused slot only', async () => {
+    const publish = await start()
+    act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(i * 80, x))))
+    expect(worn()).toEqual(['Top B'])
+    tab('ボトムス')
+    act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(1000 + i * 80, x))))
+    expect(worn()).toEqual(['Top B', 'Pants'])
+    fireEvent.click(screen.getByRole('checkbox', { name: '手のスワイプで切り替え' }))
+    act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(3000 + i * 80, x))))
+    expect(worn()).toEqual(['Top B', 'Pants'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
 
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'カメラを起動',
-      }),
-    )
+  it('discards partial gestures on focus changes', async () => {
+    const publish = await start()
+    act(() => [-0.5, -0.2, 0.1].forEach((x, i) => publish(makeSwipeFrame(i * 80, x))))
+    tab('ボトムス')
+    act(() => publish(makeSwipeFrame(240, 0.4)))
+    expect(worn()).toEqual(['Top A'])
+  })
 
-    await screen.findByRole('button', {
-      name: 'カメラを停止',
-    })
-
-    const publish = await getPosePublisher()
-
-    act(() =>
-      [-0.5, -0.2, 0.1].forEach((x, i) => {
-        publish(makeSwipeFrame(i * 80, x))
-      }),
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '次の服' }))
-
-    act(() => {
-      publish(makeSwipeFrame(240, 0.4))
-    })
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
-
-    act(() =>
-      [-0.5, -0.2, 0.1].forEach((x, i) => {
-        publish(makeSwipeFrame(400 + i * 80, x))
-      }),
-    )
-
-    fireEvent.click(
-      screen.getByRole('checkbox', {
-        name: '鏡のように左右反転',
-      }),
-    )
-
-    act(() => {
-      publish(makeSwipeFrame(640, 0.4))
-    })
-
-    expect(screen.getByText('2 / 3')).toBeInTheDocument()
-
-    act(() =>
-      [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => {
-        publish(makeSwipeFrame(800 + i * 80, x))
-      }),
-    )
-
-    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+  it('removes individual slots without restarting the session and can equip again', async () => {
+    await start()
+    tab('ボトムス'); choose('Pants')
+    fireEvent.click(screen.getByRole('button', { name: 'Top Aを外す' }))
+    expect(worn()).toEqual(['Pants'])
+    fireEvent.click(screen.getByRole('button', { name: 'Pantsを外す' }))
+    expect(worn()).toEqual([])
+    choose('Pants')
+    expect(worn()).toEqual(['Pants'])
     expect(startPoseSession).toHaveBeenCalledOnce()
   })
 
@@ -677,7 +352,7 @@ describe('CameraView', () => {
       name: 'カメラを停止',
     })
 
-    expect(startPoseSession).toHaveBeenCalledOnce()
+    await waitFor(() => expect(startPoseSession).toHaveBeenCalledOnce())
 
     const dispose = vi.mocked(startPoseSession).mock.results[0].value
 
@@ -704,7 +379,7 @@ describe('CameraView', () => {
 
     fireEvent.click(
       screen.getByRole('checkbox', {
-        name: 'Tシャツを表示',
+        name: '服を表示',
       }),
     )
 
@@ -712,11 +387,11 @@ describe('CameraView', () => {
 
     fireEvent.click(
       screen.getByRole('checkbox', {
-        name: 'Tシャツを表示',
+        name: '服を表示',
       }),
     )
 
-    expect(startPoseSession).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(startPoseSession).toHaveBeenCalledTimes(2))
 
     const secondDispose =
       vi.mocked(startPoseSession).mock.results[1].value

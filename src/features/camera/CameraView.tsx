@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from 'react'
@@ -14,11 +15,11 @@ import {
 } from './cameraService'
 import { VirtualMirror } from '../virtualTryOn/VirtualMirror'
 import {
-  filterGarments,
   garments,
 } from '../wardrobe/garments'
-import type { GarmentFilter } from '../wardrobe/garments'
-import { GarmentSelector } from '../wardrobe/GarmentSelector'
+import { OutfitSelector } from '../wardrobe/OutfitSelector'
+import { createOutfitState, getFocusedGarments, getWornGarments, reduceOutfit } from '../wardrobe/outfitState'
+import type { OutfitAction, OutfitState } from '../wardrobe/outfitState'
 import type { SwipeDirection } from '../gesture/swipeDetector'
 
 type CameraStatus =
@@ -29,7 +30,10 @@ type CameraStatus =
 
 type InputKind = 'camera' | 'debug'
 
-const DEBUG_VIDEO_URL = '/debug-pose.mp4'
+const DEBUG_VIDEO_URL = `${import.meta.env.BASE_URL}debug-pose.mp4`
+
+const wardrobeReducer = (state: OutfitState, action: OutfitAction) =>
+  reduceOutfit(state, action, garments)
 
 interface CapturableVideoElement extends HTMLVideoElement {
   captureStream?: () => MediaStream
@@ -376,119 +380,23 @@ export function CameraView() {
   const [debugActive, setDebugActive] =
     useState(false)
 
-  const [
-    garmentFilter,
-    setGarmentFilter,
-  ] = useState<GarmentFilter>('all')
+  const [outfit, dispatch] = useReducer(wardrobeReducer, garments, createOutfitState)
+  const candidates = useMemo(() => getFocusedGarments(outfit, garments), [outfit])
+  const worn = useMemo(() => getWornGarments(outfit, garments), [outfit])
+  const focusedIndex = candidates.findIndex(item => item.id === outfit.selected[outfit.focus])
+  const canCycle = candidates.length > 1 || (candidates.length === 1 && focusedIndex < 0)
+  const [swipeEnabled, setSwipeEnabled] = useState(true)
+  const [gestureResetKey, setGestureResetKey] = useState(0)
 
-  const [
-    garmentId,
-    setGarmentId,
-  ] = useState<string | null>(
-    garments[0]?.id ?? null,
-  )
+  // Stable callback: the reducer uses the CURRENT focus, not a closed-over index.
+  // Do not reset the detector on each swipe; it owns its cooldown/re-arm state.
+  const onSwipe = useCallback((direction: SwipeDirection) => {
+    dispatch({ type: 'cycle', direction })
+  }, [])
 
-  const filteredGarments = useMemo(
-    () =>
-      filterGarments(
-        garments,
-        garmentFilter,
-      ),
-    [garmentFilter],
-  )
-
-  const garmentIndex = Math.max(
-    0,
-    filteredGarments.findIndex(
-      (garment) =>
-        garment.id === garmentId,
-    ),
-  )
-
-  const garment =
-    filteredGarments[garmentIndex] ??
-    null
-
-  const [
-    swipeEnabled,
-    setSwipeEnabled,
-  ] = useState(true)
-
-  const [
-    gestureResetKey,
-    setGestureResetKey,
-  ] = useState(0)
-
-  const onSwipe = useCallback(
-    (direction: SwipeDirection) => {
-      setGarmentId((id) => {
-        if (!filteredGarments.length) {
-          return null
-        }
-
-        const index = Math.max(
-          0,
-          filteredGarments.findIndex(
-            (item) => item.id === id,
-          ),
-        )
-
-        const next =
-          (
-            index +
-            (direction === 'next'
-              ? 1
-              : -1) +
-            filteredGarments.length
-          ) %
-          filteredGarments.length
-
-        return filteredGarments[next].id
-      })
-    },
-    [filteredGarments],
-  )
-
-  const selectGarment = useCallback(
-    (index: number) => {
-      setGarmentId(
-        filteredGarments[index]?.id ??
-          null,
-      )
-
-      setGestureResetKey(
-        (key) => key + 1,
-      )
-    },
-    [filteredGarments],
-  )
-
-  function selectFilter(
-    filter: GarmentFilter,
-  ) {
-    const available =
-      filterGarments(
-        garments,
-        filter,
-      )
-
-    setGarmentFilter(filter)
-
-    setGarmentId((id) =>
-      available.some(
-        (item) => item.id === id,
-      )
-        ? id
-        : (available[0]?.id ?? null),
-    )
-
-    /*
-     * Do not let a partially completed swipe
-     * select a garment in the new category.
-     */
-    setGestureResetKey(
-      (key) => key + 1,
-    )
+  function onWardrobeAction(action: OutfitAction) {
+    dispatch(action)
+    setGestureResetKey(key => key + 1)
   }
 
   const release = useCallback(() => {
@@ -877,13 +785,10 @@ export function CameraView() {
                     showGarment={
                       showGarment
                     }
-                    garment={
-                      garment
-                    }
+                    garments={worn}
                     swipeEnabled={
                       swipeEnabled &&
-                      filteredGarments.length >
-                        1
+                      canCycle
                     }
                     gestureResetKey={
                       gestureResetKey
@@ -1008,28 +913,12 @@ export function CameraView() {
             </p>
           )}
 
-          <GarmentSelector
-            garments={
-              filteredGarments
-            }
-            index={garmentIndex}
-            filter={garmentFilter}
-            onFilterChange={
-              selectFilter
-            }
-            onSelect={
-              selectGarment
-            }
+          <OutfitSelector
+            state={outfit}
+            candidates={candidates}
+            worn={worn}
+            onAction={onWardrobeAction}
           />
-
-          {filteredGarments.length >
-            1 && (
-            <p className="swipe-guide">
-              画面で 右 → 左：次の服
-              <br />
-              左 → 右：前の服
-            </p>
-          )}
 
           <ol className="steps">
             <li>
@@ -1098,7 +987,7 @@ export function CameraView() {
 
           <label className="mirror-toggle">
             <span>
-              Tシャツを表示
+              服を表示
             </span>
 
             <input
@@ -1131,8 +1020,7 @@ export function CameraView() {
               }
               disabled={
                 !showGarment ||
-                filteredGarments.length <
-                  2
+                !canCycle
               }
               onChange={(event) =>
                 setSwipeEnabled(

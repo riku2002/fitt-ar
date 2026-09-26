@@ -15,7 +15,7 @@ interface Props {
   mirrored: boolean
   showSkeleton: boolean
   showGarment: boolean
-  garment: Garment | null
+  garments: readonly Garment[]
   swipeEnabled: boolean
   gestureResetKey: number
   onSwipe: (direction: SwipeDirection) => void
@@ -37,7 +37,7 @@ function MirrorSession({
   mirrored,
   showSkeleton,
   showGarment,
-  garment,
+  garments,
   swipeEnabled,
   gestureResetKey,
   onSwipe,
@@ -55,11 +55,11 @@ function MirrorSession({
         return createPoseLandmarker()
       },
     )
-  }, [videoRef, source])
+  }, [videoRef, source]) // Selections never restart inference.
   return (
     <>
-      {showGarment && garment && (
-        <GarmentOverlay source={source} garment={garment} mirrored={mirrored} />
+      {showGarment && (
+        <GarmentOverlay source={source} garments={garments} mirrored={mirrored} />
       )}
       {showSkeleton && <PoseOverlay source={source} />}
       <PoseDiagnostics source={source} mirrored={mirrored} />
@@ -75,7 +75,7 @@ function MirrorSession({
                   ? '身体の一部を検出中'
                   : '身体を追跡中'}
         </p>
-        {showGarment && garment && swipeEnabled && (
+        {showGarment && swipeEnabled && (
           <SwipeGesture
             source={source}
             mirrored={mirrored}

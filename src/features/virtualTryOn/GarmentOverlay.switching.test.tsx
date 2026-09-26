@@ -7,7 +7,7 @@ import { GarmentOverlay } from './GarmentOverlay'
 import { CameraView } from '../camera/CameraView'
 import { startPoseSession } from '../pose/poseSession'
 import { createPoseChannel } from '../pose/poseChannel'
-import { DEFAULT_GARMENT_MODEL_URL, demoGarment, garments } from '../wardrobe/garments'
+import { DEFAULT_GARMENT_MODEL_URL, demoGarment, garments, getGarmentSlot } from '../wardrobe/garments'
 import type { Garment } from '../wardrobe/garments'
 import { makeSwipeFrame } from '../../test/swipeFixture'
 
@@ -276,7 +276,7 @@ it('routes a real wrist swipe through CameraView to another GLB without restarti
       publish(makeSwipeFrame(now, x))
     }
   })
-  expect(screen.getByText(`2 / ${garments.length}`)).toBeInTheDocument()
+  expect(screen.getByText(`2 / ${garments.filter(item => getGarmentSlot(item.category) === 'tops').length}`)).toBeInTheDocument()
   expect(harness.load).toHaveBeenLastCalledWith(garments[1].modelUrl)
   expect(latestAsset().name).toBe(garments[1].modelUrl)
   expect(startPoseSession).toHaveBeenCalledOnce()
