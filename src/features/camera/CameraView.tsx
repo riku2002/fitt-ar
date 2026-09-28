@@ -394,6 +394,12 @@ export function CameraView() {
     dispatch({ type: 'cycle', direction })
   }, [])
 
+  // Stable callback: the reducer toggles from its current focus, so the
+  // gesture never closes over an outdated tops/bottoms value.
+  const onToggleFocus = useCallback(() => {
+    dispatch({ type: 'toggle-focus' })
+  }, [])
+
   function onWardrobeAction(action: OutfitAction) {
     dispatch(action)
     setGestureResetKey(key => key + 1)
@@ -786,8 +792,10 @@ export function CameraView() {
                       showGarment
                     }
                     garments={worn}
-                    swipeEnabled={
-                      swipeEnabled &&
+                    gestureEnabled={
+                      swipeEnabled
+                    }
+                    canSwipe={
                       canCycle
                     }
                     gestureResetKey={
@@ -795,6 +803,9 @@ export function CameraView() {
                     }
                     onSwipe={
                       onSwipe
+                    }
+                    onToggleFocus={
+                      onToggleFocus
                     }
                   />
                 )}
@@ -954,11 +965,11 @@ export function CameraView() {
 
               <div>
                 <strong>
-                  胸の高さで手をスワイプ
+                  手のジェスチャーで操作
                 </strong>
 
                 <p>
-                  正面を向いて肩・腰・手首を映します。切り替わったら手を少し止めて、次の操作へ。
+                  片手を胸の高さで横へスワイプすると服を変更。両手首を肩より上に約0.7秒キープすると、トップス／ボトムスの操作対象を切り替えます。
                 </p>
               </div>
             </li>
@@ -1010,7 +1021,7 @@ export function CameraView() {
 
           <label className="mirror-toggle">
             <span>
-              手のスワイプで切り替え
+              手のジェスチャーで切り替え
             </span>
 
             <input
@@ -1019,8 +1030,7 @@ export function CameraView() {
                 swipeEnabled
               }
               disabled={
-                !showGarment ||
-                !canCycle
+                !showGarment
               }
               onChange={(event) =>
                 setSwipeEnabled(

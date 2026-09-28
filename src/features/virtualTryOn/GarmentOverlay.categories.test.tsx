@@ -100,7 +100,21 @@ function setup(category: GarmentCategory, markers = true, extra: Partial<Garment
   const scene = fixture(category, markers)
   harness.load.mockReturnValue({ scene })
   const source = createPoseChannel()
-  const garment: Garment = { ...demoGarment, id: category, category, ...extra }
+  const garment: Garment = {
+    ...demoGarment,
+    id: category,
+    category,
+    ...extra,
+    // These category tests validate the body-fit projection itself. The
+    // production bottoms layer intentionally adds a small negative Z offset
+    // so tops render in front at the waist. Neutralize only that visual
+    // layering here; GarmentOverlay.outfit.test.tsx covers the real Z-order.
+    fit3D: {
+      ...demoGarment.fit3D,
+      layerOffsetZ: 0,
+      ...extra.fit3D,
+    },
+  }
   const view = render(<GarmentOverlay source={source} garment={garment} mirrored />)
   return { source, view, garment }
 }
@@ -118,6 +132,10 @@ function expectMarkerFits(pose: PoseFrame, name: string, index: number) {
     (1 - projected.y) * size.height / 2).distanceTo(expected)).toBeLessThan(1e-7)
 }
 
+function rememberOccluderRoot(group: THREE.Group) {
+  masks = group
+}
+
 beforeEach(() => {
   now = 1000; size = { width: 640, height: 480 }; masks = null
   camera = new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 100)
@@ -130,7 +148,7 @@ beforeEach(() => {
   vi.spyOn(THREE.Group.prototype, 'add').mockImplementation(function (
     this: THREE.Group, ...objects: THREE.Object3D[]
   ) {
-    if (this.name === 'AR_Occluders') masks = this
+    if (this.name === 'AR_Occluders') rememberOccluderRoot(this)
     inheritedAdd.apply(this, objects)
     return this
   })

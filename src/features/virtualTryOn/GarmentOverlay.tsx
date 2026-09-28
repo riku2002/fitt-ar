@@ -108,6 +108,7 @@ interface Profile {
   fitTorso: boolean
   visualScale: [number, number, number]
   visualOffset: [number, number, number]
+  renderOrder: number
   segments: SegmentSpec[]
 }
 
@@ -165,7 +166,13 @@ function resolveProfile(
       (fitting?.scale ?? 1) * (fitting?.scaleY ?? 1),
       (fitting?.scale ?? 1) * (fitting?.scaleZ ?? 1),
     ],
-    visualOffset: [fitting?.offsetX ?? 0, fitting?.offsetY ?? 0, fitting?.offsetZ ?? 0],
+    visualOffset: [
+      fitting?.offsetX ?? 0,
+      fitting?.offsetY ?? 0,
+      (fitting?.offsetZ ?? 0) +
+        (fitting?.layerOffsetZ ?? (bottom ? -0.035 : 0)),
+    ],
+    renderOrder: fitting?.renderOrder ?? (bottom ? 10 : 20),
     segments,
   }
 }
@@ -364,7 +371,8 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
       profile.span <= 0 || profile.span > 1 || profile.height < 0 || profile.height > 1 ||
       profile.depth < 0 || profile.depth > 1 ||
       !profile.visualScale.every(value => Number.isFinite(value) && value > 0) ||
-      !profile.visualOffset.every(Number.isFinite)) throw new Error('Invalid fit3D calibration')
+      !profile.visualOffset.every(Number.isFinite) ||
+      !Number.isFinite(profile.renderOrder)) throw new Error('Invalid fit3D calibration')
   const asset = clone(scene)
   const oriented = new THREE.Group()
   oriented.rotation.set(...profile.rotation)
@@ -447,12 +455,16 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
     if (object instanceof THREE.Mesh) {
       object.material = Array.isArray(object.material) ? object.material.map(ownMaterial) : ownMaterial(object.material)
       object.castShadow = true; object.receiveShadow = false
+      object.renderOrder = profile.renderOrder
       shadowCasters.push(object)
     }
     if (object instanceof THREE.SkinnedMesh) skeletons.add(object.skeleton)
   })
   const root = new THREE.Group()
-  root.name = 'AR_GarmentRoot'; root.visible = false; root.add(visual)
+  root.name = 'AR_GarmentRoot'
+  root.visible = false
+  root.renderOrder = profile.renderOrder
+  root.add(visual)
   return { root, materials, skeletons, shadowCasters, corners, hipCenter,
     alpha: 0, placed: false, stretch: 1 }
 }
@@ -785,7 +797,9 @@ type OverlayProps = {
 export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayProps) {
   const worn = useMemo(() => {
     const list = garments ?? (garment ? [garment] : [])
-    const dress = list.find(item => getGarmentSlot(item.category) === 'onepiece')
+    // onepiece belongs to the tops UI slot, but remains full-body/exclusive.
+    // Check the anatomical category directly rather than the UI slot.
+    const dress = list.find(item => item.category === 'onepiece')
     if (dress) return [dress]
     return (['tops', 'bottoms'] as const).flatMap(slot => {
       const item = list.find(candidate => getGarmentSlot(candidate.category) === slot)

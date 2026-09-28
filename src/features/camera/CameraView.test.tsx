@@ -45,6 +45,13 @@ async function getPosePublisher() {
 function tab(name: string) { fireEvent.click(screen.getByRole('tab', { name })) }
 function choose(name: string) { fireEvent.click(screen.getByRole('button', { name: `${name}を選ぶ` })) }
 function worn() { return screen.queryAllByTestId('worn-garment').map(node => node.textContent) }
+function makeFocusFrame(timestamp: number, raised: boolean) {
+  const left = makeSwipeFrame(timestamp, 0, 15, raised ? -0.4 : 0.7)
+  const right = makeSwipeFrame(timestamp, 0, 16, raised ? -0.4 : 0.7)
+  const landmarks = left.landmarks.map((point) => ({ ...point }))
+  landmarks[16] = { ...right.landmarks[16] }
+  return { ...left, landmarks }
+}
 async function start() {
   getUserMedia.mockResolvedValue(fakeStream().stream)
   render(<CameraView />)
@@ -71,10 +78,10 @@ describe('CameraView', () => {
   it('browses only focused candidates without opening the camera', () => {
     render(<CameraView />)
     expect(screen.getByRole('tab', { name: 'トップス' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pantsを選ぶ' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '次の服' }))
-    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
     expect(getUserMedia).not.toHaveBeenCalled()
   })
 
@@ -94,17 +101,35 @@ describe('CameraView', () => {
     expect(getUserMedia).toHaveBeenCalledOnce()
   })
 
-  it('makes onepiece exclusive and leaves it on until another garment is selected', async () => {
+  it('lists onepiece in tops, hides remembered bottoms, and restores them when returning to a top', async () => {
     await start()
-    tab('ボトムス'); choose('Pants')
-    tab('ワンピース')
-    expect(worn()).toEqual(['Top A', 'Pants'])
+    tab('ボトムス')
+    choose('Pants')
+    tab('トップス')
+    expect(screen.getByRole('button', { name: 'Dressを選ぶ' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'ワンピース' })).not.toBeInTheDocument()
     choose('Dress')
     expect(worn()).toEqual(['Dress'])
-    tab('トップス')
+
+    tab('ボトムス')
+    expect(
+      screen.getByRole('button', { name: 'Pantsを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
     expect(worn()).toEqual(['Dress'])
+
+    tab('トップス')
     choose('Top A')
-    expect(worn()).toEqual(['Top A'])
+    expect(worn()).toEqual(['Top A', 'Pants'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('removes a worn onepiece when bottoms are selected', async () => {
+    await start()
+    choose('Dress')
+    expect(worn()).toEqual(['Dress'])
+    tab('ボトムス')
+    choose('Pants')
+    expect(worn()).toEqual(['Pants'])
     expect(startPoseSession).toHaveBeenCalledOnce()
   })
 
@@ -116,9 +141,9 @@ describe('CameraView', () => {
     expect(screen.queryByRole('button', { name: 'Top Bを選ぶ' })).not.toBeInTheDocument()
     choose('Top A')
     expect(worn()).toEqual(['Top A'])
-    tab('ワンピース')
-    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
-    expect(screen.getByText(/このカテゴリの服はまだありません/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
+    expect(screen.getByRole('button', { name: 'Dressを選ぶ' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Top Bを選ぶ' })).not.toBeInTheDocument()
     expect(worn()).toEqual(['Top A'])
   })
 
@@ -129,9 +154,64 @@ describe('CameraView', () => {
     tab('ボトムス')
     act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(1000 + i * 80, x))))
     expect(worn()).toEqual(['Top B', 'Pants'])
-    fireEvent.click(screen.getByRole('checkbox', { name: '手のスワイプで切り替え' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '手のジェスチャーで切り替え' }))
     act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(3000 + i * 80, x))))
     expect(worn()).toEqual(['Top B', 'Pants'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('toggles the focused slot after both hands stay above the shoulders', async () => {
+    const publish = await start()
+
+    expect(
+      screen.getByRole('tab', { name: 'トップス' }),
+    ).toHaveAttribute('aria-selected', 'true')
+
+    act(() => {
+      for (const time of [0, 100, 200, 300]) {
+        publish(makeFocusFrame(time, false))
+      }
+
+      for (const time of [400, 600, 800, 1000, 1120]) {
+        publish(makeFocusFrame(time, true))
+      }
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('tab', { name: 'ボトムス' }),
+      ).toHaveAttribute('aria-selected', 'true'),
+    )
+
+    expect(worn()).toEqual(['Top A'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('swipes seamlessly from a top to onepiece while preserving the hidden bottom selection', async () => {
+    const publish = await start()
+    choose('Top B')
+    tab('ボトムス')
+    choose('Pants')
+    tab('トップス')
+    expect(worn()).toEqual(['Top B', 'Pants'])
+
+    act(() =>
+      [-0.5, -0.2, 0.1, 0.4].forEach((x, index) =>
+        publish(makeSwipeFrame(2000 + index * 80, x)),
+      ),
+    )
+
+    expect(worn()).toEqual(['Dress'])
+
+    tab('ボトムス')
+    expect(
+      screen.getByRole('button', { name: 'Pantsを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(worn()).toEqual(['Dress'])
+
+    tab('トップス')
+    choose('Top A')
+    expect(worn()).toEqual(['Top A', 'Pants'])
     expect(startPoseSession).toHaveBeenCalledOnce()
   })
 

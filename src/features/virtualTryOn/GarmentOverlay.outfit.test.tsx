@@ -131,6 +131,37 @@ it('renders two garments in ONE Canvas with ONE pose subscription', () => {
   expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-urls', JSON.stringify([top.modelUrl, pants.modelUrl]))
 })
 
+it('keeps tops in front of bottoms at the outfit overlap boundary', () => {
+  const top = ready('top')
+  const pants = ready('pants', 'bottoms')
+
+  render(
+    <GarmentOverlay
+      source={createPoseChannel()}
+      garments={[top, pants]}
+      mirrored
+    />,
+  )
+
+  const topRoot = root('top')
+  const bottomRoot = root('pants')
+
+  const topVisual = topRoot.getObjectByName('AR_GarmentCalibration')
+  const bottomVisual = bottomRoot.getObjectByName('AR_GarmentCalibration')
+
+  if (!topVisual || !bottomVisual) {
+    throw new Error('Missing garment calibration group')
+  }
+
+  // Camera is on +Z looking toward the origin. A more-negative local Z puts
+  // the bottom farther behind its body-fit plane, while the top stays neutral.
+  expect(topVisual.position.z).toBeGreaterThan(bottomVisual.position.z)
+
+  // Opaque overlap is primarily depth-tested; renderOrder makes transparent
+  // fade/switch frames deterministic as well.
+  expect(topRoot.renderOrder).toBeGreaterThan(bottomRoot.renderOrder)
+})
+
 it('switches only the bottom instance, preserving the top and Canvas', () => {
   const top = ready('top'), pants = ready('pants', 'bottoms'), skirt = ready('skirt', 'bottoms')
   const source = createPoseChannel()
@@ -161,12 +192,16 @@ it('isolates a bottom load error and retries it without disposing the top', () =
   expect(harness.mount).toHaveBeenCalledOnce()
 })
 
-it('defensively makes onepiece exclusive even for inconsistent external input', () => {
+it('defensively makes onepiece exclusive even though it belongs to the tops UI slot', () => {
   const top = ready('top'), pants = ready('pants', 'bottoms'), dress = ready('dress', 'onepiece')
   render(<GarmentOverlay source={createPoseChannel()} garments={[top, pants, dress]} mirrored />)
   expect(harness.load).toHaveBeenCalledWith(dress.modelUrl)
   expect(harness.load).not.toHaveBeenCalledWith(top.modelUrl)
   expect(harness.load).not.toHaveBeenCalledWith(pants.modelUrl)
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute(
+    'data-model-url',
+    dress.modelUrl,
+  )
 })
 
 it('keeps visual scale and offsets separate from the fitted root', () => {

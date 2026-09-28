@@ -16,13 +16,21 @@ interface Props {
   showSkeleton: boolean
   showGarment: boolean
   garments: readonly Garment[]
-  swipeEnabled: boolean
+
+  /** Master switch for hand-based controls. */
+  gestureEnabled: boolean
+
+  /** Horizontal swipe is only useful when the focused slot can cycle. */
+  canSwipe: boolean
+
   gestureResetKey: number
   onSwipe: (direction: SwipeDirection) => void
+  onToggleFocus: () => void
 }
 
 export function VirtualMirror(props: Props) {
   const [attempt, setAttempt] = useState(0)
+
   return (
     <MirrorSession
       key={attempt}
@@ -38,33 +46,56 @@ function MirrorSession({
   showSkeleton,
   showGarment,
   garments,
-  swipeEnabled,
+  gestureEnabled,
+  canSwipe,
   gestureResetKey,
   onSwipe,
+  onToggleFocus,
   retry,
 }: Props & { retry: () => void }) {
   const [source] = useState(createPoseChannel)
   const [state, setState] = useState<PoseState>('loading')
+
   useEffect(() => {
-    if (!videoRef.current) return
+    if (!videoRef.current) {
+      return
+    }
+
     return startPoseSession(
       videoRef.current,
-      { onFrame: source.publish, onState: setState },
+      {
+        onFrame: source.publish,
+        onState: setState,
+      },
       async () => {
         const { createPoseLandmarker } = await import('../pose/poseLandmarker')
         return createPoseLandmarker()
       },
     )
-  }, [videoRef, source]) // Selections never restart inference.
+  }, [videoRef, source]) // Selections/focus changes never restart inference.
+
   return (
     <>
       {showGarment && (
-        <GarmentOverlay source={source} garments={garments} mirrored={mirrored} />
+        <GarmentOverlay
+          source={source}
+          garments={garments}
+          mirrored={mirrored}
+        />
       )}
+
       {showSkeleton && <PoseOverlay source={source} />}
-      <PoseDiagnostics source={source} mirrored={mirrored} />
+
+      <PoseDiagnostics
+        source={source}
+        mirrored={mirrored}
+      />
+
       <div className={`pose-hud ${mirrored ? 'is-mirrored' : ''}`}>
-        <p role="status" className={`pose-message pose-${state}`}>
+        <p
+          role="status"
+          className={`pose-message pose-${state}`}
+        >
           {state === 'loading'
             ? '姿勢推定を準備しています…'
             : state === 'error'
@@ -75,16 +106,23 @@ function MirrorSession({
                   ? '身体の一部を検出中'
                   : '身体を追跡中'}
         </p>
-        {showGarment && swipeEnabled && (
+
+        {showGarment && gestureEnabled && (
           <SwipeGesture
             source={source}
             mirrored={mirrored}
             resetKey={gestureResetKey}
+            canSwipe={canSwipe}
             onSwipe={onSwipe}
+            onToggleFocus={onToggleFocus}
           />
         )}
+
         {state === 'error' && (
-          <button className="pose-retry" onClick={retry}>
+          <button
+            className="pose-retry"
+            onClick={retry}
+          >
             姿勢推定を再試行
           </button>
         )}

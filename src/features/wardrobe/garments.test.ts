@@ -4,6 +4,8 @@ import {
   demoGarment,
   filterGarments,
   garments,
+  garmentSlotLabels,
+  getGarmentSlot,
 } from './garments'
 import type { Garment, GarmentFilter } from './garments'
 
@@ -73,4 +75,16 @@ it('registers all five actual model/icon paths and the new categories', () => {
     expect(item?.modelUrl).toBe(`${import.meta.env.BASE_URL}garments/${filename}.glb`)
     expect(item?.image).toBe(`${import.meta.env.BASE_URL}garments/${filename}_icon.png`)
   }
+})
+
+it('exposes only tops and bottoms slots and groups onepiece with tops', () => {
+  expect(garmentSlotLabels).toEqual({
+    tops: 'トップス',
+    bottoms: 'ボトムス',
+  })
+  expect(getGarmentSlot('tshirt')).toBe('tops')
+  expect(getGarmentSlot('shirt')).toBe('tops')
+  expect(getGarmentSlot('jacket')).toBe('tops')
+  expect(getGarmentSlot('onepiece')).toBe('tops')
+  expect(getGarmentSlot('bottoms')).toBe('bottoms')
 })

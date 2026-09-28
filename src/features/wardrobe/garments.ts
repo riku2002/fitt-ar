@@ -12,16 +12,21 @@ export type GarmentCategory =
   | 'jacket'
   | 'bottoms'
   | 'onepiece'
-export type GarmentSlot = 'tops' | 'bottoms' | 'onepiece'
+
+/**
+ * UI / outfit slots are intentionally only two groups.
+ * A onepiece is browsed and selected from the tops slot, but remains
+ * category='onepiece' so 3D fitting/occlusion can keep its full-body behavior.
+ */
+export type GarmentSlot = 'tops' | 'bottoms'
 
 export const garmentSlotLabels: Record<GarmentSlot, string> = {
   tops: 'トップス',
   bottoms: 'ボトムス',
-  onepiece: 'ワンピース',
 }
 
 export function getGarmentSlot(category: GarmentCategory): GarmentSlot {
-  return category === 'bottoms' ? 'bottoms' : category === 'onepiece' ? 'onepiece' : 'tops'
+  return category === 'bottoms' ? 'bottoms' : 'tops'
 }
 
 export type OcclusionSegment = 'upper' | 'forearm' | 'thigh' | 'shin'
@@ -50,6 +55,25 @@ export interface Garment3DFit {
   offsetX?: number
   offsetY?: number
   offsetZ?: number
+
+  /**
+   * Outfit-layer bias, also in normalized primary anchor-width units.
+   * This is separate from offsetZ so calibration and top/bottom overlap can be
+   * tuned independently. Negative values move the garment farther from the
+   * camera along its local back direction.
+   *
+   * Defaults in GarmentOverlay:
+   *   tops/onepiece: 0
+   *   bottoms:      -0.035
+   */
+  layerOffsetZ?: number
+
+  /**
+   * Deterministic draw ordering, mainly relevant while garments are fading and
+   * therefore transparent. Opaque overlap is still resolved by the depth buffer.
+   * Defaults: tops=20, bottoms=10, onepiece=20.
+   */
+  renderOrder?: number
 }
 
 export interface OcclusionOverride {
@@ -131,8 +155,9 @@ export const demoGarment: Garment = {
   category: 'tshirt',
 }
 
-// Gender labels are demo metadata, not inferred from the model geometry.
-// Catalog order is shared by swipes, buttons and thumbnails.
+// Catalog order is also the swipe order inside each slot.
+// Because onepiece maps to 'tops', the default order below is:
+// T-shirt 01 -> T-shirt 02 -> onepiece -> T-shirt 01 ...
 export const garments: readonly Garment[] = [
   demoGarment,
   {
@@ -156,6 +181,9 @@ export const garments: readonly Garment[] = [
       scaleX: 1.5,
       scaleY: 2.8,
       offsetY: 0.1,
+      // Keep waist geometry slightly behind tops at the overlap boundary.
+      layerOffsetZ: -0.05,
+      renderOrder: 10,
     },
   },
   {
@@ -170,6 +198,9 @@ export const garments: readonly Garment[] = [
       scaleX: 1.5,
       scaleY: 2.8,
       offsetY: 0.1,
+      // Keep waist geometry slightly behind tops at the overlap boundary.
+      layerOffsetZ: -0.05,
+      renderOrder: 10,
     },
   },
   {
@@ -180,7 +211,6 @@ export const garments: readonly Garment[] = [
     modelUrl: `${base}garments/dress.glb`,
     gender: 'unisex',
     category: 'onepiece',
-    // fit3D: { fitTorsoLength: true },
     fit3D: {
       scaleX: 1.5,
       scaleY: 1.8,

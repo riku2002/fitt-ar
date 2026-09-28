@@ -2,7 +2,7 @@
 .outfit-selector button { font: inherit; cursor: pointer; border: 1px solid #c8d2c2; background: #fff; color: #253d32; border-radius: 8px; padding: 8px; }
 .outfit-selector button:disabled { opacity: .45; cursor: default; }
 .outfit-selector button:focus-visible { outline: 3px solid #609446; outline-offset: 2px; }
-.outfit-selector .outfit-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.outfit-selector .outfit-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
 .outfit-selector .outfit-tabs [aria-selected="true"] { color: #fff; background: #253d32; }
 .outfit-selector .outfit-tabs button { font-size: 12px; padding: 10px 4px; overflow-wrap: anywhere; }
 .outfit-selector .outfit-hint { font-size: 11px; line-height: 1.6; color: #65715f; margin: 10px 0; }
