@@ -28,6 +28,64 @@ describe('garment catalog', () => {
       expect(garment.modelUrl).toBeTruthy()
     }
   })
+
+  it('registers unique catalog items with valid model/icon paths and supported slots', () => {
+    // The catalog is intentionally extensible. Do not hard-code an exact count:
+    // adding a new garment should not make this test fail merely because the
+    // catalog grew. The original five built-in entries must still be present.
+    expect(garments.length).toBeGreaterThanOrEqual(5)
+
+    expect(new Set(garments.map((item) => item.id)).size).toBe(
+      garments.length,
+    )
+
+    for (const item of garments) {
+      expect(item.id.trim()).not.toBe('')
+      expect(item.name.trim()).not.toBe('')
+
+      if (!item.modelUrl) {
+        throw new Error(`Garment ${item.id} is missing modelUrl`)
+      }
+
+      expect(item.modelUrl).toContain('garments/')
+      expect(item.modelUrl.toLowerCase()).toMatch(/\.glb$/)
+
+      expect(item.image).toContain('garments/')
+      expect(item.image.toLowerCase()).toMatch(/\.(png|webp|jpe?g)$/)
+
+      expect([
+        'tshirt',
+        'shirt',
+        'jacket',
+        'bottoms',
+        'onepiece',
+      ]).toContain(item.category)
+
+      expect(getGarmentSlot(item.category)).toBe(
+        item.category === 'bottoms' ? 'bottoms' : 'tops',
+      )
+    }
+
+    const requiredBuiltIns = [
+      ['tshirt-1', 'tshirt', 'tshirt1'],
+      ['tshirt-2', 'tshirt', 'tshirt2'],
+      ['pants', 'bottoms', 'pants'],
+      ['skirt', 'bottoms', 'skirt'],
+      ['dress', 'onepiece', 'dress'],
+    ] as const
+
+    for (const [id, category, filename] of requiredBuiltIns) {
+      const item = garments.find((garment) => garment.id === id)
+
+      expect(item?.category).toBe(category)
+      expect(item?.modelUrl).toBe(
+        `${import.meta.env.BASE_URL}garments/${filename}.glb`,
+      )
+      expect(item?.image).toBe(
+        `${import.meta.env.BASE_URL}garments/${filename}_icon.png`,
+      )
+    }
+  })
 })
 
 describe('filterGarments', () => {
@@ -58,30 +116,12 @@ describe('filterGarments', () => {
   })
 })
 
-
-it('registers all five actual model/icon paths and the new categories', () => {
-  const expected = [
-    ['tshirt-1', 'tshirt', 'tshirt1'],
-    ['tshirt-2', 'tshirt', 'tshirt2'],
-    ['pants', 'bottoms', 'pants'],
-    ['skirt', 'bottoms', 'skirt'],
-    ['dress', 'onepiece', 'dress'],
-  ]
-  expect(garments).toHaveLength(expected.length)
-  expect(new Set(garments.map(item => item.id)).size).toBe(garments.length)
-  for (const [id, category, filename] of expected) {
-    const item = garments.find(garment => garment.id === id)
-    expect(item?.category).toBe(category)
-    expect(item?.modelUrl).toBe(`${import.meta.env.BASE_URL}garments/${filename}.glb`)
-    expect(item?.image).toBe(`${import.meta.env.BASE_URL}garments/${filename}_icon.png`)
-  }
-})
-
 it('exposes only tops and bottoms slots and groups onepiece with tops', () => {
   expect(garmentSlotLabels).toEqual({
     tops: 'トップス',
     bottoms: 'ボトムス',
   })
+
   expect(getGarmentSlot('tshirt')).toBe('tops')
   expect(getGarmentSlot('shirt')).toBe('tops')
   expect(getGarmentSlot('jacket')).toBe('tops')

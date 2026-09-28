@@ -50,6 +50,10 @@ docs/
   swipe-reliability.md
 public/
   garments/
+    Autumn_girly_top_icon.png
+    Autumn_girly_top.glb
+    black_girly_top_icon.png
+    black_girly_top.glb
     dress_icon.png
     dress.glb
     pants_icon.png
@@ -64,6 +68,8 @@ public/
     tshirt1.glb
     tshirt2_icon.png
     tshirt2.glb
+    white_dress_icon.png
+    white_dress.glb
   models/
     MEDIAPIPE-LICENSE.txt
     pose_landmarker_lite.task
@@ -83,6 +89,8 @@ src/
       CameraView.test.tsx
       CameraView.tsx
     gesture/
+      focusToggleDetector.test.ts
+      focusToggleDetector.ts
       swipeDetector.test.ts
       swipeDetector.ts
       SwipeGesture.tsx
@@ -116,6 +124,7 @@ src/
       GarmentSelector.test.tsx
       GarmentSelector.tsx
       OutfitSelector.css
+      OutfitSelector.test.tsx
       OutfitSelector.tsx
       outfitState.test.ts
       outfitState.ts
@@ -134,7 +143,6 @@ eslint.config.js
 index.html
 package.json
 README.md
-test-log.txt
 tsconfig.app.json
 tsconfig.json
 tsconfig.node.json
@@ -538,6 +546,371 @@ export function cameraErrorMessage(error: unknown): string {
 }
 </file>
 
+<file path="src/features/gesture/focusToggleDetector.test.ts">
+import { describe, expect, it } from 'vitest'
+import { makePoseFrame } from '../../test/poseFixture'
+import { createFocusToggleDetector } from './focusToggleDetector'
+
+function frame(time: number, wrists: 'low' | 'high' | 'mixed' = 'low') {
+  const source = makePoseFrame()
+  const landmarks = source.landmarks.map((point) => ({ ...point }))
+
+  // The fixture shoulders are near y=0.25. Use an unambiguous distance on
+  // either side of the shoulder line.
+  landmarks[15] = {
+    ...landmarks[15],
+    y: wrists === 'high' || wrists === 'mixed' ? 0.08 : 0.48,
+    visibility: 1,
+    presence: 1,
+  }
+
+  landmarks[16] = {
+    ...landmarks[16],
+    y: wrists === 'high' ? 0.08 : 0.48,
+    visibility: 1,
+    presence: 1,
+  }
+
+  return {
+    ...source,
+    timestamp: time,
+    landmarks,
+  }
+}
+
+function arm(detector: ReturnType<typeof createFocusToggleDetector>, start = 0) {
+  for (const offset of [0, 100, 200, 300]) {
+    detector.push(frame(start + offset, 'low'))
+  }
+}
+
+describe('createFocusToggleDetector', () => {
+  it('toggles once after both wrists stay above their shoulders', () => {
+    const detector = createFocusToggleDetector()
+    arm(detector)
+
+    const events: boolean[] = []
+
+    for (const time of [400, 600, 800, 1000, 1120]) {
+      events.push(Boolean(detector.push(frame(time, 'high')).toggle))
+    }
+
+    expect(events).toEqual([false, false, false, false, true])
+  })
+
+  it('does not repeatedly toggle while both hands remain raised', () => {
+    const detector = createFocusToggleDetector()
+    arm(detector)
+
+    let toggles = 0
+
+    for (const time of [400, 600, 800, 1000, 1120, 1300, 1500, 1800, 2200]) {
+      if (detector.push(frame(time, 'high')).toggle) {
+        toggles += 1
+      }
+    }
+
+    expect(toggles).toBe(1)
+  })
+
+  it('requires both hands to be lowered before another toggle can occur', () => {
+    const detector = createFocusToggleDetector()
+    arm(detector)
+
+    for (const time of [400, 600, 800, 1000, 1120]) {
+      detector.push(frame(time, 'high'))
+    }
+
+    for (const time of [1200, 1320, 1460]) {
+      detector.push(frame(time, 'low'))
+    }
+
+    let toggled = false
+
+    for (const time of [1560, 1760, 1960, 2160, 2280]) {
+      toggled ||= Boolean(detector.push(frame(time, 'high')).toggle)
+    }
+
+    expect(toggled).toBe(true)
+  })
+
+  it('does not toggle when only one hand is above the shoulders', () => {
+    const detector = createFocusToggleDetector()
+    arm(detector)
+
+    for (const time of [400, 700, 1000, 1300, 1600]) {
+      expect(detector.push(frame(time, 'mixed')).toggle).toBeUndefined()
+    }
+  })
+
+  it('blocks horizontal swipe recognition while the two-hand gesture is held', () => {
+    const detector = createFocusToggleDetector()
+    arm(detector)
+
+    const holding = detector.push(frame(400, 'high'))
+
+    expect(holding.state).toBe('holding')
+    expect(holding.blockSwipe).toBe(true)
+  })
+
+  it('requires valid wrist tracking', () => {
+    const detector = createFocusToggleDetector()
+    arm(detector)
+
+    const missing = frame(500, 'high')
+    missing.landmarks[16].visibility = 0.1
+
+    const result = detector.push(missing)
+    expect(result.state).toBe('searching')
+    expect(result.toggle).toBeUndefined()
+  })
+})
+</file>
+
+<file path="src/features/gesture/focusToggleDetector.ts">
+import { isVisible } from '../pose/poseGeometry'
+import type { PoseFrame } from '../pose/poseTypes'
+
+export type FocusToggleState =
+  | 'searching'
+  | 'arming'
+  | 'ready'
+  | 'holding'
+  | 'wait-release'
+
+export interface FocusToggleResult {
+  state: FocusToggleState
+  toggle?: true
+  /** 0..1 while the user is holding both hands above the shoulders. */
+  progress: number
+  /** Prevent a horizontal swipe from being recognized during this gesture. */
+  blockSwipe: boolean
+}
+
+/**
+ * Distances are normalized by the detected shoulder width, not by raw pixels.
+ * This keeps the gesture threshold reasonably stable across camera distance and
+ * portrait / landscape video.
+ */
+export const FOCUS_TOGGLE = {
+  holdMs: 700,
+  releaseMs: 250,
+  maxGapMs: 320,
+
+  /** Each wrist must be this many shoulder-widths above its own shoulder. */
+  raiseMargin: 0.15,
+
+  /** Both wrists must be this far below their shoulders to re-arm. */
+  releaseMargin: 0.08,
+
+  minShoulderWidthPx: 40,
+} as const
+
+export function createFocusToggleDetector() {
+  let armed = false
+  let mustRelease = false
+
+  let holdSince: number | undefined
+  let loweredSince: number | undefined
+
+  let lastTime = -Infinity
+  let dimensions = ''
+
+  function result(
+    state: FocusToggleState,
+    blockSwipe: boolean,
+    progress = 0,
+    toggle = false,
+  ): FocusToggleResult {
+    return {
+      state,
+      blockSwipe,
+      progress: Math.max(0, Math.min(1, progress)),
+      ...(toggle ? { toggle: true as const } : {}),
+    }
+  }
+
+  function clearTiming() {
+    holdSince = undefined
+    loweredSince = undefined
+  }
+
+  return {
+    push(frame: PoseFrame | null): FocusToggleResult {
+      if (
+        !frame ||
+        !Number.isFinite(frame.timestamp) ||
+        !Number.isFinite(frame.width) ||
+        !Number.isFinite(frame.height) ||
+        frame.width <= 0 ||
+        frame.height <= 0
+      ) {
+        clearTiming()
+        armed = false
+        return result(
+          mustRelease ? 'wait-release' : 'searching',
+          mustRelease,
+        )
+      }
+
+      const { timestamp: time, width, height, landmarks } = frame
+
+      if (time <= lastTime) {
+        return result(
+          mustRelease ? 'wait-release' : armed ? 'ready' : 'arming',
+          mustRelease,
+        )
+      }
+
+      const size = `${width}:${height}`
+
+      if (
+        dimensions !== '' &&
+        (time - lastTime > FOCUS_TOGGLE.maxGapMs || dimensions !== size)
+      ) {
+        clearTiming()
+        armed = false
+      }
+
+      lastTime = time
+      dimensions = size
+
+      const leftShoulder = landmarks[11]
+      const rightShoulder = landmarks[12]
+      const leftWrist = landmarks[15]
+      const rightWrist = landmarks[16]
+
+      if (
+        !isVisible(leftShoulder) ||
+        !isVisible(rightShoulder) ||
+        !isVisible(leftWrist) ||
+        !isVisible(rightWrist)
+      ) {
+        holdSince = undefined
+        loweredSince = undefined
+
+        return result(
+          mustRelease ? 'wait-release' : 'searching',
+          mustRelease,
+        )
+      }
+
+      const shoulderDx =
+        (leftShoulder.x - rightShoulder.x) * width
+
+      const shoulderDy =
+        (leftShoulder.y - rightShoulder.y) * height
+
+      const shoulderWidth = Math.hypot(shoulderDx, shoulderDy)
+
+      if (
+        !Number.isFinite(shoulderWidth) ||
+        shoulderWidth < FOCUS_TOGGLE.minShoulderWidthPx
+      ) {
+        clearTiming()
+        armed = false
+        return result(
+          mustRelease ? 'wait-release' : 'searching',
+          mustRelease,
+        )
+      }
+
+      // MediaPipe normalized y grows downward.
+      const leftAbove =
+        ((leftShoulder.y - leftWrist.y) * height) / shoulderWidth
+
+      const rightAbove =
+        ((rightShoulder.y - rightWrist.y) * height) / shoulderWidth
+
+      const leftBelow =
+        ((leftWrist.y - leftShoulder.y) * height) / shoulderWidth
+
+      const rightBelow =
+        ((rightWrist.y - rightShoulder.y) * height) / shoulderWidth
+
+      const bothHigh =
+        leftAbove >= FOCUS_TOGGLE.raiseMargin &&
+        rightAbove >= FOCUS_TOGGLE.raiseMargin
+
+      const bothLowered =
+        leftBelow >= FOCUS_TOGGLE.releaseMargin &&
+        rightBelow >= FOCUS_TOGGLE.releaseMargin
+
+      /**
+       * After a successful toggle, do not allow another toggle or swipe until
+       * both hands have clearly returned below shoulder level for a short time.
+       */
+      if (mustRelease) {
+        holdSince = undefined
+
+        if (!bothLowered) {
+          loweredSince = undefined
+          return result('wait-release', true)
+        }
+
+        loweredSince ??= time
+
+        if (time - loweredSince < FOCUS_TOGGLE.releaseMs) {
+          return result('wait-release', true)
+        }
+
+        mustRelease = false
+        armed = true
+        loweredSince = undefined
+
+        return result('ready', false)
+      }
+
+      /**
+       * New/reset detectors are intentionally not armed until a normal
+       * hands-down posture has been observed. This prevents an accidental
+       * toggle when the component remounts while the user's hands are already
+       * above their shoulders.
+       */
+      if (!armed) {
+        holdSince = undefined
+
+        if (!bothLowered) {
+          loweredSince = undefined
+          return result('arming', bothHigh)
+        }
+
+        loweredSince ??= time
+
+        if (time - loweredSince < FOCUS_TOGGLE.releaseMs) {
+          return result('arming', false)
+        }
+
+        armed = true
+        loweredSince = undefined
+        return result('ready', false)
+      }
+
+      if (!bothHigh) {
+        holdSince = undefined
+        return result('ready', false)
+      }
+
+      holdSince ??= time
+
+      const elapsed = time - holdSince
+      const progress = elapsed / FOCUS_TOGGLE.holdMs
+
+      if (elapsed < FOCUS_TOGGLE.holdMs) {
+        return result('holding', true, progress)
+      }
+
+      armed = false
+      mustRelease = true
+      holdSince = undefined
+      loweredSince = undefined
+
+      return result('wait-release', true, 1, true)
+    },
+  }
+}
+</file>
+
 <file path="src/features/gesture/swipeReplay.test.ts">
 import { describe, expect, it } from 'vitest'
 import { makeSwipeFrame } from '../../test/swipeFixture'
@@ -916,495 +1289,6 @@ it('propagates an initialization error if neither backend can start', async () =
 })
 </file>
 
-<file path="src/features/virtualTryOn/GarmentOverlay.categories.test.tsx">
-import { act, cleanup, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { useFrame } from '@react-three/fiber'
-import type { RootState } from '@react-three/fiber'
-import * as THREE from 'three'
-import { clone } from 'three/addons/utils/SkeletonUtils.js'
-import { createPoseChannel } from '../pose/poseChannel'
-import type { PoseFrame, PosePoint } from '../pose/poseTypes'
-import { demoGarment } from '../wardrobe/garments'
-import type { Garment, GarmentCategory } from '../wardrobe/garments'
-import { GarmentOverlay } from './GarmentOverlay'
-
-const harness = vi.hoisted(() => ({ load: vi.fn(), clear: vi.fn() }))
-vi.mock('@react-three/fiber', async () => {
-  const { createElement, Fragment } = await import('react')
-  return {
-    Canvas: ({ children }: { children: ReactNode }) => createElement(Fragment, null, children),
-    useFrame: vi.fn(),
-  }
-})
-vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(harness.load, { clear: harness.clear }) }))
-vi.mock('three/addons/utils/SkeletonUtils.js', async importOriginal => {
-  const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
-  return { ...original, clone: vi.fn(original.clone) }
-})
-
-let now = 1000
-let size = { width: 640, height: 480 }
-let camera: THREE.PerspectiveCamera
-let masks: THREE.Group | null = null
-const geometries: THREE.BufferGeometry[] = []
-const materials: THREE.Material[] = []
-const inheritedAdd = THREE.Object3D.prototype.add
-
-function fixture(category: GarmentCategory, markers = true) {
-  const scene = new THREE.Group()
-  scene.position.set(40, -25, 50)
-  const bottom = category === 'bottoms', dress = category === 'onepiece'
-  const geometry = new THREE.BoxGeometry(1.6, dress ? 3.4 : 1.7, 0.2)
-  const material = new THREE.MeshStandardMaterial()
-  geometries.push(geometry); materials.push(material)
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.name = 'CategoryCloth'
-  scene.add(mesh)
-  if (markers) {
-    for (const [name, x, y] of [
-      ['AR_LeftShoulder', 0.5, 0.7], ['AR_RightShoulder', -0.5, 0.7],
-      ['AR_LeftHip', 0.5, bottom ? 0.7 : -0.8], ['AR_RightHip', -0.5, bottom ? 0.7 : -0.8],
-    ] as const) {
-      const marker = new THREE.Object3D()
-      marker.name = name; marker.position.set(x, y, 0); scene.add(marker)
-    }
-  }
-  return scene
-}
-function frame(): PoseFrame {
-  const landmarks: PosePoint[] = Array.from({ length: 33 }, () => ({ x: 0, y: 0, z: 0, visibility: 0 }))
-  for (const [index, x, y] of [
-    [11, 0.65, 0.20], [12, 0.35, 0.20],
-    [13, 0.73, 0.32], [14, 0.27, 0.32],
-    [15, 0.68, 0.45], [16, 0.32, 0.45],
-    [23, 0.61, 0.53], [24, 0.39, 0.53],
-    [25, 0.61, 0.72], [26, 0.39, 0.72],
-    [27, 0.61, 0.93], [28, 0.39, 0.93],
-  ]) landmarks[index] = { x, y, z: 0, visibility: 1 }
-  return { width: 720, height: 1280, timestamp: now, landmarks }
-}
-function asset() {
-  const result = vi.mocked(clone).mock.results.at(-1)
-  if (!result || result.type !== 'return') throw new Error('No cloned fixture')
-  return result.value as THREE.Object3D
-}
-function root() {
-  let object: THREE.Object3D | null = asset()
-  while (object && object.name !== 'AR_GarmentRoot') object = object.parent
-  if (!object) throw new Error('Missing garment root')
-  return object
-}
-function maskRoot(): THREE.Group {
-  if (!masks) throw new Error('Missing occluder group')
-  return masks
-}
-function draw(dt = 1 / 60) {
-  const callback = vi.mocked(useFrame).mock.calls.at(-1)?.[0]
-  if (!callback) throw new Error('No frame callback')
-  camera.aspect = size.width / size.height
-  camera.updateProjectionMatrix()
-  act(() => callback({ camera, size } as RootState, dt))
-}
-function emit(source: ReturnType<typeof createPoseChannel>, pose: PoseFrame | null) {
-  now += 80
-  act(() => source.publish(pose ? { ...pose, timestamp: now } : null))
-  draw()
-}
-function acquire(source: ReturnType<typeof createPoseChannel>, pose = frame()) {
-  for (let i = 0; i < 6; i++) emit(source, pose)
-}
-function setup(category: GarmentCategory, markers = true, extra: Partial<Garment> = {}) {
-  const scene = fixture(category, markers)
-  harness.load.mockReturnValue({ scene })
-  const source = createPoseChannel()
-  const garment: Garment = { ...demoGarment, id: category, category, ...extra }
-  const view = render(<GarmentOverlay source={source} garment={garment} mirrored />)
-  return { source, view, garment }
-}
-function expectMarkerFits(pose: PoseFrame, name: string, index: number) {
-  root().updateMatrixWorld(true)
-  const marker = asset().getObjectByName(name)
-  if (!marker) throw new Error('Missing marker')
-  const projected = marker.getWorldPosition(new THREE.Vector3()).project(camera)
-  const fit = Math.min(size.width / pose.width, size.height / pose.height)
-  const expected = new THREE.Vector2(
-    (size.width - pose.width * fit) / 2 + pose.landmarks[index].x * pose.width * fit,
-    (size.height - pose.height * fit) / 2 + pose.landmarks[index].y * pose.height * fit,
-  )
-  expect(new THREE.Vector2((projected.x + 1) * size.width / 2,
-    (1 - projected.y) * size.height / 2).distanceTo(expected)).toBeLessThan(1e-7)
-}
-
-beforeEach(() => {
-  now = 1000; size = { width: 640, height: 480 }; masks = null
-  camera = new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 100)
-  camera.position.z = 5; camera.updateMatrixWorld(true)
-  vi.useFakeTimers()
-  vi.spyOn(performance, 'now').mockImplementation(() => now)
-  vi.mocked(useFrame).mockClear(); vi.mocked(clone).mockClear()
-  harness.load.mockReset(); harness.clear.mockReset()
-  // Observe CPU scene construction, not private React DOM internals.
-  vi.spyOn(THREE.Group.prototype, 'add').mockImplementation(function (
-    this: THREE.Group, ...objects: THREE.Object3D[]
-  ) {
-    if (this.name === 'AR_Occluders') masks = this
-    inheritedAdd.apply(this, objects)
-    return this
-  })
-})
-afterEach(() => {
-  cleanup()
-  geometries.splice(0).forEach(geometry => geometry.dispose())
-  materials.splice(0).forEach(material => material.dispose())
-  vi.restoreAllMocks(); vi.useRealTimers()
-})
-
-it.each(['tshirt', 'bottoms', 'onepiece'] as const)(
-  'fits the category-specific anchors through landscape and portrait contain: %s', category => {
-    for (const canvas of [{ width: 640, height: 480 }, { width: 480, height: 800 }]) {
-      size = canvas
-      for (const dimensions of [[720, 1280], [1280, 720]]) {
-        const state = setup(category)
-        const pose = { ...frame(), width: dimensions[0], height: dimensions[1] }
-        acquire(state.source, pose)
-        expect(root().visible).toBe(true)
-        const hip = category === 'bottoms'
-        expectMarkerFits(pose, hip ? 'AR_LeftHip' : 'AR_LeftShoulder', hip ? 23 : 11)
-        expectMarkerFits(pose, hip ? 'AR_RightHip' : 'AR_RightShoulder', hip ? 24 : 12)
-        state.view.unmount()
-      }
-    }
-  },
-)
-it('fits bottoms with missing shoulders instead of reusing a shoulder pose', () => {
-  const { source } = setup('bottoms')
-  const pose = frame()
-  pose.landmarks[11].visibility = 0; pose.landmarks[12].visibility = 0
-  acquire(source, pose)
-  expect(root().visible).toBe(true)
-  expectMarkerFits(pose, 'AR_LeftHip', 23)
-  expectMarkerFits(pose, 'AR_RightHip', 24)
-})
-it('freezes and fades bottoms when hips disappear even though shoulders remain valid', () => {
-  const { source } = setup('bottoms')
-  acquire(source)
-  const position = root().position.clone()
-  const missing = frame(); missing.landmarks[23].visibility = 0
-  emit(source, missing)
-  expect(root().position.equals(position)).toBe(true)
-  draw(0.5)
-  expect(root().visible).toBe(false)
-})
-it('retains uniform dress scale when GLB hip markers are absent', () => {
-  const { source } = setup('onepiece', false)
-  acquire(source)
-  expect(root().visible).toBe(true)
-  expect(root().scale.x).toBeCloseTo(root().scale.y, 10)
-})
-it('uses real dress hip markers for bounded length adjustment without moving shoulder anchors', () => {
-  const { source } = setup('onepiece')
-  const pose = frame()
-  acquire(source, pose)
-  expect(root().scale.y / root().scale.x).toBeCloseTo(1.25, 8)
-  expectMarkerFits(pose, 'AR_LeftShoulder', 11)
-  expectMarkerFits(pose, 'AR_RightShoulder', 12)
-})
-it('allows a dress to explicitly retain uniform authored proportions', () => {
-  const { source } = setup('onepiece', true, { fit3D: { fitTorsoLength: false } })
-  acquire(source)
-  expect(root().scale.y).toBeCloseTo(root().scale.x, 8)
-})
-it('uses hip fallback calibration without requiring marker nodes', () => {
-  const { source } = setup('bottoms', false)
-  acquire(source)
-  expect(root().visible).toBe(true)
-  expect(Number.isFinite(root().scale.x)).toBe(true)
-})
-it('lerps a changed pelvis width instead of snapping', () => {
-  const { source } = setup('bottoms')
-  acquire(source)
-  const initial = root().scale.x
-  const closer = frame()
-  closer.landmarks[23].x = 0.72; closer.landmarks[24].x = 0.28
-  emit(source, closer)
-  expect(root().scale.x).toBeCloseTo(initial * (2 - Math.exp(-14 / 60)), 8)
-})
-it.each([
-  ['tshirt', ['upper', 'forearm']],
-  ['bottoms', ['thigh', 'shin']],
-  ['onepiece', ['upper', 'forearm', 'thigh', 'shin']],
-] as const)('constructs only the correct occluder types for %s', (category, kinds) => {
-  setup(category)
-  expect(maskRoot().children.map(object => object.name).sort()).toEqual(
-    kinds.flatMap(kind => [`AR_left_${kind}`, `AR_right_${kind}`]).sort(),
-  )
-  let depth = 0, shadow = 0
-  maskRoot().traverse(object => {
-    if (!(object instanceof THREE.Mesh) || Array.isArray(object.material)) return
-    if (object.material instanceof THREE.ShadowMaterial) {
-      shadow += 1
-      expect(object.receiveShadow).toBe(true)
-    } else {
-      depth += 1
-      expect(object.material.colorWrite).toBe(false)
-      expect(object.material.depthWrite).toBe(true)
-    }
-  })
-  expect(depth).toBe(kinds.length * 6)
-  expect(shadow).toBe(depth)
-})
-it('updates leg masks and disables only the unreliable segment', () => {
-  const { source } = setup('bottoms')
-  const pose = frame()
-  pose.landmarks[25].z = -0.055; pose.landmarks[27].z = -0.077
-  acquire(source, pose)
-  const thigh = maskRoot().getObjectByName('AR_left_thigh')!
-  const shin = maskRoot().getObjectByName('AR_left_shin')!
-  expect(thigh.visible).toBe(true); expect(shin.visible).toBe(true)
-  const badAnkle = { ...pose, landmarks: pose.landmarks.map(p => ({ ...p })) }
-  badAnkle.landmarks[27].visibility = 0
-  emit(source, badAnkle)
-  expect(thigh.visible).toBe(true); expect(shin.visible).toBe(false)
-  expect(root().visible).toBe(true)
-})
-it('permits per-garment covered-segment masks to be disabled', () => {
-  setup('bottoms', true, { occlusion3D: { thigh: { enabled: false } } })
-  expect(maskRoot().children.map(object => object.name).sort()).toEqual(['AR_left_shin', 'AR_right_shin'])
-})
-it('clears old masks on category switch without replacing the pose subscription', () => {
-  const initial = setup('bottoms')
-  const subscribe = vi.spyOn(initial.source, 'subscribe')
-  const old = maskRoot()
-  acquire(initial.source)
-  const newGarment: Garment = { ...initial.garment, category: 'tshirt' }
-  harness.load.mockReturnValue({ scene: fixture('tshirt') })
-  initial.view.rerender(<GarmentOverlay source={initial.source} garment={newGarment} mirrored />)
-  expect(subscribe).not.toHaveBeenCalled()
-  expect(old.visible).toBe(false)
-  expect(maskRoot()).not.toBe(old)
-  expect(maskRoot().children.some(object => object.name.includes('thigh'))).toBe(false)
-  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-fit-axis', 'shoulders')
-})
-</file>
-
-<file path="src/features/virtualTryOn/GarmentOverlay.outfit.test.tsx">
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { useFrame } from '@react-three/fiber'
-import type { RootState } from '@react-three/fiber'
-import * as THREE from 'three'
-import { clone } from 'three/addons/utils/SkeletonUtils.js'
-import { GarmentOverlay } from './GarmentOverlay'
-import { demoGarment } from '../wardrobe/garments'
-import type { Garment } from '../wardrobe/garments'
-import { createPoseChannel } from '../pose/poseChannel'
-import { makePoseFrame } from '../../test/poseFixture'
-
-const harness = vi.hoisted(() => ({
-  load: vi.fn(), clear: vi.fn(), mount: vi.fn(), unmount: vi.fn(),
-  frames: new Set<(state: RootState, delta: number) => void>(),
-}))
-vi.mock('@react-three/fiber', async () => {
-  const { createElement, Fragment, useEffect, useLayoutEffect, useRef } = await import('react')
-  function useFrameDouble(callback: Parameters<typeof useFrame>[0]) {
-    const current = useRef(callback)
-    useLayoutEffect(() => { current.current = callback })
-    useEffect(() => {
-      const tick = (state: RootState, delta: number) => current.current(state, delta)
-      harness.frames.add(tick)
-      return () => { harness.frames.delete(tick) }
-    }, [])
-  }
-  return {
-    Canvas: function CanvasDouble({ children }: { children: ReactNode }) {
-      useEffect(() => { harness.mount(); return () => { harness.unmount() } }, [])
-      return createElement(Fragment, null, children)
-    },
-    useFrame: vi.fn(useFrameDouble),
-  }
-})
-vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(harness.load, { clear: harness.clear }) }))
-vi.mock('three/addons/utils/SkeletonUtils.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
-  return { ...original, clone: vi.fn(original.clone) }
-})
-
-const cache = new Map<string, THREE.Group | Error>()
-const owned: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = []
-let now = 1000
-const size = { width: 640, height: 480 }
-let camera: THREE.PerspectiveCamera
-
-function ready(id: string, category: Garment['category'] = 'tshirt', markers = true): Garment {
-  const modelUrl = `/outfit-test/${id}.glb`
-  const scene = new THREE.Group()
-  scene.name = id
-  scene.position.set(40, -25, 50)
-  const geometry = new THREE.BoxGeometry(1.6, 1.7, 0.2)
-  const material = new THREE.MeshStandardMaterial()
-  owned.push({ geometry, material })
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.name = 'Cloth'
-  scene.add(mesh)
-  if (markers) {
-    for (const [name, x] of [[category === 'bottoms' ? 'AR_LeftHip' : 'AR_LeftShoulder', 0.5],
-      [category === 'bottoms' ? 'AR_RightHip' : 'AR_RightShoulder', -0.5]] as const) {
-      const marker = new THREE.Object3D()
-      marker.name = name; marker.position.set(x, 0.7, 0)
-      scene.add(marker)
-    }
-  }
-  cache.set(modelUrl, scene)
-  return { ...demoGarment, id, name: id, category, modelUrl }
-}
-function asset(id: string): THREE.Object3D {
-  const result = [...vi.mocked(clone).mock.results].reverse().find(r => r.type === 'return' && r.value.name === id)
-  if (!result || result.type !== 'return') throw new Error(`Missing asset ${id}`)
-  return result.value
-}
-function root(id: string): THREE.Object3D {
-  let object: THREE.Object3D | null = asset(id)
-  while (object && object.name !== 'AR_GarmentRoot') object = object.parent
-  if (!object) throw new Error('Missing root')
-  return object
-}
-function material(id: string): THREE.Material {
-  const mesh = asset(id).getObjectByName('Cloth')
-  if (!(mesh instanceof THREE.Mesh) || Array.isArray(mesh.material)) throw new Error('Missing material')
-  return mesh.material
-}
-function acquire(source: ReturnType<typeof createPoseChannel>) {
-  for (let i = 0; i < 3; i++) {
-    now += 80
-    act(() => source.publish({ ...makePoseFrame(), timestamp: now }))
-    if (harness.frames.size === 0) throw new Error('Missing frame callback')
-    act(() => {
-      for (const callback of harness.frames) callback({ camera, size } as RootState, 1 / 60)
-    })
-  }
-}
-beforeEach(() => {
-  now = 1000
-  vi.useFakeTimers()
-  vi.spyOn(performance, 'now').mockImplementation(() => now)
-  camera = new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 100)
-  camera.position.z = 5; camera.updateMatrixWorld(true)
-  harness.load.mockReset().mockImplementation((url: string) => {
-    const scene = cache.get(url)
-    if (!scene || scene instanceof Error) throw scene ?? new Error('Missing model')
-    return { scene }
-  })
-  harness.clear.mockReset()
-  harness.mount.mockClear(); harness.unmount.mockClear(); harness.frames.clear()
-  vi.mocked(clone).mockClear(); vi.mocked(useFrame).mockClear()
-})
-afterEach(() => {
-  cleanup()
-  owned.forEach(item => { item.geometry.dispose(); item.material.dispose() })
-  owned.length = 0; cache.clear()
-  vi.restoreAllMocks(); vi.useRealTimers()
-})
-
-it('renders two garments in ONE Canvas with ONE pose subscription', () => {
-  const top = ready('top'), pants = ready('pants', 'bottoms')
-  const source = createPoseChannel()
-  const subscribe = vi.spyOn(source, 'subscribe')
-  render(<GarmentOverlay source={source} garments={[top, pants]} mirrored />)
-  expect(asset('top')).not.toBe(asset('pants'))
-  expect(root('top')).not.toBe(root('pants'))
-  acquire(source)
-  expect(root('top').visible).toBe(true)
-  expect(root('pants').visible).toBe(true)
-  expect(harness.mount).toHaveBeenCalledOnce()
-  expect(subscribe).toHaveBeenCalledOnce()
-  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-urls', JSON.stringify([top.modelUrl, pants.modelUrl]))
-})
-
-it('switches only the bottom instance, preserving the top and Canvas', () => {
-  const top = ready('top'), pants = ready('pants', 'bottoms'), skirt = ready('skirt', 'bottoms')
-  const source = createPoseChannel()
-  const view = render(<GarmentOverlay source={source} garments={[top, pants]} mirrored />)
-  const oldTop = asset('top')
-  const topDispose = vi.spyOn(material('top'), 'dispose')
-  const bottomDispose = vi.spyOn(material('pants'), 'dispose')
-  view.rerender(<GarmentOverlay source={source} garments={[top, skirt]} mirrored />)
-  expect(asset('top')).toBe(oldTop)
-  expect(topDispose).not.toHaveBeenCalled()
-  expect(bottomDispose).toHaveBeenCalledOnce()
-  expect(asset('skirt').name).toBe('skirt')
-  expect(harness.mount).toHaveBeenCalledOnce()
-  expect(harness.unmount).not.toHaveBeenCalled()
-})
-
-it('isolates a bottom load error and retries it without disposing the top', () => {
-  const top = ready('top'), broken = ready('broken', 'bottoms')
-  const source = createPoseChannel()
-  const view = render(<GarmentOverlay source={source} garments={[top]} mirrored />)
-  const topDispose = vi.spyOn(material('top'), 'dispose')
-  cache.set(broken.modelUrl!, new Error('Intentional failure'))
-  view.rerender(<GarmentOverlay source={source} garments={[top, broken]} mirrored />)
-  harness.clear.mockImplementation(() => { ready('broken', 'bottoms') })
-  fireEvent.click(screen.getByRole('button', { name: 'brokenの3Dモデルを再読み込み' }))
-  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(broken.modelUrl)
-  expect(topDispose).not.toHaveBeenCalled()
-  expect(harness.mount).toHaveBeenCalledOnce()
-})
-
-it('defensively makes onepiece exclusive even for inconsistent external input', () => {
-  const top = ready('top'), pants = ready('pants', 'bottoms'), dress = ready('dress', 'onepiece')
-  render(<GarmentOverlay source={createPoseChannel()} garments={[top, pants, dress]} mirrored />)
-  expect(harness.load).toHaveBeenCalledWith(dress.modelUrl)
-  expect(harness.load).not.toHaveBeenCalledWith(top.modelUrl)
-  expect(harness.load).not.toHaveBeenCalledWith(pants.modelUrl)
-})
-
-it('keeps visual scale and offsets separate from the fitted root', () => {
-  const plain = ready('plain')
-  const source = createPoseChannel()
-  const first = render(<GarmentOverlay source={source} garment={plain} mirrored />)
-  acquire(source)
-  const position = root('plain').position.clone()
-  const scale = root('plain').scale.clone()
-  first.unmount()
-  const calibrated = { ...ready('calibrated'), fit3D: { scaleX: 1.4, scaleY: 1.1, offsetY: 0.10 } }
-  render(<GarmentOverlay source={source} garment={calibrated} mirrored />)
-  acquire(source)
-  expect(root('calibrated').position.distanceTo(position)).toBeLessThan(1e-10)
-  expect(root('calibrated').scale.distanceTo(scale)).toBeLessThan(1e-10)
-  const visual = root('calibrated').getObjectByName('AR_GarmentCalibration')
-  if (!visual) throw new Error('Missing calibration group')
-  expect(visual.scale.toArray()).toEqual([1.4, 1.1, 1])
-  expect(visual.position.toArray()).toEqual([0, 0.10, 0])
-})
-
-it('halving a fallback anchorSpan doubles displayed width without changing tracking scale', () => {
-  function measure(span: number, id: string) {
-    const garment = { ...ready(id, 'bottoms', false), fit3D: { anchorSpan: span } }
-    const source = createPoseChannel()
-    const view = render(<GarmentOverlay source={source} garment={garment} mirrored />)
-    acquire(source)
-    const object = root(id)
-    object.updateMatrixWorld(true)
-    const width = new THREE.Box3().setFromObject(object, true).getSize(new THREE.Vector3()).x
-    const scale = object.scale.x
-    view.unmount()
-    return { width, scale }
-  }
-  const a = measure(0.6, 'a'), b = measure(0.3, 'b')
-  expect(b.scale).toBeCloseTo(a.scale, 10)
-  expect(b.width / a.width).toBeCloseTo(2, 10)
-})
-
-it('rejects invalid calibration instead of rendering NaN or collapsed geometry', () => {
-  const garment = { ...ready('invalid'), fit3D: { scaleY: 0 } }
-  render(<GarmentOverlay source={createPoseChannel()} garment={garment} mirrored />)
-  expect(screen.getByRole('button', { name: '3Dモデルを再読み込み' })).toBeInTheDocument()
-})
-</file>
-
 <file path="src/features/virtualTryOn/garmentRenderer.ts">
 import type { PoseFrame } from '../pose/poseTypes'
 import type { Garment } from '../wardrobe/garments'
@@ -1621,330 +1505,60 @@ describe('GarmentSelector', () => {
 })
 </file>
 
-<file path="src/features/wardrobe/OutfitSelector.css">
-.outfit-selector { min-width: 0; margin: 22px 0; }
-.outfit-selector button { font: inherit; cursor: pointer; border: 1px solid #c8d2c2; background: #fff; color: #253d32; border-radius: 8px; padding: 8px; }
-.outfit-selector button:disabled { opacity: .45; cursor: default; }
-.outfit-selector button:focus-visible { outline: 3px solid #609446; outline-offset: 2px; }
-.outfit-selector .outfit-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
-.outfit-selector .outfit-tabs [aria-selected="true"] { color: #fff; background: #253d32; }
-.outfit-selector .outfit-tabs button { font-size: 12px; padding: 10px 4px; overflow-wrap: anywhere; }
-.outfit-selector .outfit-hint { font-size: 11px; line-height: 1.6; color: #65715f; margin: 10px 0; }
-.outfit-selector .outfit-filter { border: 0; margin: 12px 0; padding: 0; }
-.outfit-selector .outfit-filter legend { font-size: 12px; margin-bottom: 6px; }
-.outfit-selector .outfit-filter label { display: inline-flex; gap: 4px; align-items: center; margin-right: 12px; font-size: 12px; }
-.outfit-selector .outfit-preview { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
-.outfit-selector .outfit-preview img { width: 90px; height: 100px; object-fit: contain; }
-.outfit-selector .outfit-preview p { margin: 4px 0; font-size: 11px; }
-.outfit-selector .outfit-preview span { font-size: 11px; }
-.outfit-selector .outfit-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.outfit-selector .outfit-actions button { flex: 1 1 auto; font-size: 12px; }
-.outfit-selector .outfit-thumbnails { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
-.outfit-selector .outfit-thumbnails button { padding: 6px; min-width: 0; }
-.outfit-selector .outfit-thumbnails img { width: 100%; height: 64px; object-fit: contain; }
-.outfit-selector .outfit-thumbnails span { display: block; font-size: 10px; overflow-wrap: anywhere; }
-.outfit-selector .outfit-thumbnails [aria-pressed="true"] { background: #edf4e4; border-color: #476641; }
-.outfit-selector .outfit-summary { border-top: 1px solid #dfe5d9; margin-top: 16px; padding-top: 12px; font-size: 12px; }
-.outfit-selector .outfit-worn-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
-.outfit-selector .outfit-worn-item button { font-size: 11px; padding: 4px 8px; }
-</file>
-
-<file path="src/features/wardrobe/OutfitSelector.tsx">
-import { useId } from 'react'
-import type { KeyboardEvent } from 'react'
-import { garmentGenderLabels, garmentSlotLabels, getGarmentSlot } from './garments'
-import type { Garment, GarmentFilter, GarmentSlot } from './garments'
-import type { OutfitAction, OutfitState } from './outfitState'
-import './OutfitSelector.css'
-
-const slots: GarmentSlot[] = ['tops', 'bottoms', 'onepiece']
-const filters: { value: GarmentFilter; label: string }[] = [
-  { value: 'men', label: '男性' },
-  { value: 'women', label: '女性' },
-  { value: 'all', label: '全て' },
-]
-
-export function OutfitSelector({ state, candidates, worn, onAction }: {
-  state: OutfitState
-  candidates: readonly Garment[]
-  worn: readonly Garment[]
-  onAction: (action: OutfitAction) => void
-}) {
-  const id = useId()
-  const index = candidates.findIndex(item => item.id === state.selected[state.focus])
-  const preview = candidates[index >= 0 ? index : 0]
-  const canCycle = candidates.length > 1 || (candidates.length === 1 && index < 0)
-
-  function onTabKey(event: KeyboardEvent<HTMLButtonElement>, current: number) {
-    let next: number
-    if (event.key === 'ArrowRight') next = (current + 1) % slots.length
-    else if (event.key === 'ArrowLeft') next = (current + slots.length - 1) % slots.length
-    else if (event.key === 'Home') next = 0
-    else if (event.key === 'End') next = slots.length - 1
-    else return
-    event.preventDefault()
-    onAction({ type: 'focus', slot: slots[next] })
-    document.getElementById(`${id}-tab-${slots[next]}`)?.focus()
-  }
-
-  return (
-    <section className="outfit-selector" aria-label="服を選ぶ">
-      <div className="outfit-tabs" role="tablist" aria-label="操作する服のカテゴリ">
-        {slots.map((slot, i) => (
-          <button key={slot} type="button" role="tab" id={`${id}-tab-${slot}`}
-            aria-selected={state.focus === slot} aria-controls={`${id}-panel`}
-            tabIndex={state.focus === slot ? 0 : -1}
-            onKeyDown={event => onTabKey(event, i)}
-            onClick={() => onAction({ type: 'focus', slot })}>
-            {garmentSlotLabels[slot]}
-          </button>
-        ))}
-      </div>
-      <div id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-tab-${state.focus}`}>
-        <p className="outfit-hint">
-          {`スワイプは「${garmentSlotLabels[state.focus]}」だけを切り替えます。`}
-        </p>
-        <fieldset className="outfit-filter">
-          <legend>{'商品の絞り込み'}</legend>
-          {filters.map(filter => (
-            <label key={filter.value}>
-              <input type="radio" name={`${id}-filter`} value={filter.value}
-                checked={state.filter === filter.value}
-                onChange={() => onAction({ type: 'filter', filter: filter.value })} />
-              {filter.label}
-            </label>
-          ))}
-        </fieldset>
-        {preview ? (
-          <>
-            <div className="outfit-preview">
-              <img src={preview.image} alt={`${preview.name}のアイコン`} />
-              <div>
-                <p className="outfit-count">{index >= 0 ? `${index + 1} / ${candidates.length}` : `未選択 / ${candidates.length}`}</p>
-                <strong>{preview.name}</strong>
-                <p>{garmentGenderLabels[preview.gender]}</p>
-                {index < 0 && <span>{'プレビュー（未着用）'}</span>}
-              </div>
-            </div>
-            <div className="outfit-actions">
-              <button type="button" disabled={!canCycle}
-                onClick={() => onAction({ type: 'cycle', direction: 'previous' })}>{'前の服'}</button>
-              <button type="button" disabled={!canCycle}
-                onClick={() => onAction({ type: 'cycle', direction: 'next' })}>{'次の服'}</button>
-              <button type="button" disabled={state.selected[state.focus] === null}
-                onClick={() => onAction({ type: 'clear', slot: state.focus })}>{'このカテゴリを外す'}</button>
-            </div>
-            <div className="outfit-thumbnails">
-              {candidates.map(item => (
-                <button key={item.id} type="button" aria-label={`${item.name}を選ぶ`}
-                  aria-pressed={item.id === state.selected[state.focus]}
-                  onClick={() => onAction({ type: 'select', id: item.id })}>
-                  <img src={item.image} alt="" /><span>{item.name}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : <p role="status">{'このカテゴリの服はまだありません。'}</p>}
-      </div>
-      <div className="outfit-summary" aria-label="着用中の組み合わせ">
-        <strong>{'着用中'}</strong>
-        {worn.length === 0 ? <p>{'服は未選択です'}</p> : worn.map(item => (
-          <div key={item.id} className="outfit-worn-item">
-            <span>{item.name}</span>
-            <button type="button" aria-label={`${item.name}を外す`}
-              onClick={() => onAction({ type: 'clear', slot: getGarmentSlot(item.category) })}>{'外す'}</button>
-          </div>
-        ))}
-        <p className="outfit-hint">{'タブ・絞り込みの変更だけでは着用中の服は変わりません。ワンピースを選ぶと上下の服は外れます。'}</p>
-      </div>
-    </section>
-  )
-}
-</file>
-
-<file path="src/features/wardrobe/outfitState.test.ts">
-import { expect, it } from 'vitest'
-import { demoGarment, getGarmentSlot } from './garments'
+<file path="src/features/wardrobe/OutfitSelector.test.tsx">
+import { fireEvent, render, screen } from '@testing-library/react'
+import { expect, it, vi } from 'vitest'
+import { OutfitSelector } from './OutfitSelector'
+import { demoGarment } from './garments'
 import type { Garment } from './garments'
-import { createOutfitState, getFocusedGarments, getWornGarments, reduceOutfit } from './outfitState'
+import { createOutfitState, getFocusedGarments } from './outfitState'
 
 const catalog: readonly Garment[] = [
-  { ...demoGarment, id: 'top-a', category: 'tshirt', gender: 'unisex' },
-  { ...demoGarment, id: 'top-b', category: 'jacket', gender: 'men' },
-  { ...demoGarment, id: 'pants', category: 'bottoms', gender: 'unisex' },
-  { ...demoGarment, id: 'skirt', category: 'bottoms', gender: 'women' },
-  { ...demoGarment, id: 'dress', category: 'onepiece', gender: 'women' },
+  { ...demoGarment, id: 'top', name: 'Top', category: 'tshirt' },
+  { ...demoGarment, id: 'dress', name: 'Dress', category: 'onepiece' },
+  { ...demoGarment, id: 'pants', name: 'Pants', category: 'bottoms' },
 ]
-const reduce = (state: ReturnType<typeof createOutfitState>, action: Parameters<typeof reduceOutfit>[1]) =>
-  reduceOutfit(state, action, catalog)
 
-it('maps all garment categories to independent slots', () => {
-  expect(['tshirt', 'shirt', 'jacket'].map(category => getGarmentSlot(category as Garment['category']))).toEqual(['tops', 'tops', 'tops'])
-  expect(getGarmentSlot('bottoms')).toBe('bottoms')
-  expect(getGarmentSlot('onepiece')).toBe('onepiece')
-})
-it('starts with one top and no automatically equipped bottoms', () => {
+it('renders only tops/bottoms tabs and shows onepiece inside tops', () => {
   const state = createOutfitState(catalog)
-  expect(state.selected).toEqual({ tops: 'top-a', bottoms: null, onepiece: null })
-  expect(createOutfitState([]).selected).toEqual({ tops: null, bottoms: null, onepiece: null })
-})
-it('focus and gender filter do not change what is worn', () => {
-  const state = createOutfitState(catalog)
-  const focused = reduce(state, { type: 'focus', slot: 'bottoms' })
-  const filtered = reduce(focused, { type: 'filter', filter: 'men' })
-  expect(filtered.selected).toEqual(state.selected)
-  expect(getFocusedGarments(filtered, catalog).map(item => item.id)).toEqual(['pants'])
-})
-it('equips tops and bottoms independently', () => {
-  let state = createOutfitState(catalog)
-  state = reduce(state, { type: 'focus', slot: 'bottoms' })
-  state = reduce(state, { type: 'select', id: 'pants' })
-  state = reduce(state, { type: 'focus', slot: 'tops' })
-  state = reduce(state, { type: 'cycle', direction: 'next' })
-  expect(getWornGarments(state, catalog).map(item => item.id)).toEqual(['top-b', 'pants'])
-})
-it('onepiece selection atomically clears both separate slots', () => {
-  let state = createOutfitState(catalog)
-  state = reduce(state, { type: 'focus', slot: 'bottoms' })
-  state = reduce(state, { type: 'select', id: 'pants' })
-  state = reduce(state, { type: 'focus', slot: 'onepiece' })
-  state = reduce(state, { type: 'select', id: 'dress' })
-  expect(state.selected).toEqual({ tops: null, bottoms: null, onepiece: 'dress' })
-  state = reduce(state, { type: 'focus', slot: 'tops' })
-  expect(getWornGarments(state, catalog).map(item => item.id)).toEqual(['dress'])
-  state = reduce(state, { type: 'select', id: 'top-a' })
-  expect(state.selected).toEqual({ tops: 'top-a', bottoms: null, onepiece: null })
-})
-it('selecting a bottom after a dress removes only the dress, without restoring old tops', () => {
-  let state = createOutfitState(catalog)
-  state = reduce(state, { type: 'focus', slot: 'onepiece' })
-  state = reduce(state, { type: 'select', id: 'dress' })
-  state = reduce(state, { type: 'focus', slot: 'bottoms' })
-  state = reduce(state, { type: 'select', id: 'pants' })
-  expect(state.selected).toEqual({ tops: null, bottoms: 'pants', onepiece: null })
-})
-it('cycles from an unselected slot in either direction and wraps', () => {
-  let state = reduce(createOutfitState(catalog), { type: 'focus', slot: 'bottoms' })
-  state = reduce(state, { type: 'cycle', direction: 'previous' })
-  expect(state.selected.bottoms).toBe('skirt')
-  state = reduce(state, { type: 'cycle', direction: 'next' })
-  expect(state.selected.bottoms).toBe('pants')
-})
-it('ignores selections outside the active slot/filter and handles no candidates', () => {
-  const initial = createOutfitState(catalog)
-  expect(reduce(initial, { type: 'select', id: 'pants' })).toBe(initial)
-  let state = reduce(initial, { type: 'focus', slot: 'onepiece' })
-  state = reduce(state, { type: 'filter', filter: 'men' })
-  expect(reduce(state, { type: 'select', id: 'dress' })).toBe(state)
-  expect(reduce(state, { type: 'cycle', direction: 'next' })).toBe(state)
-})
-it('does not mutate previous selection objects', () => {
-  const initial = createOutfitState(catalog)
-  Object.freeze(initial.selected)
-  Object.freeze(initial)
-  const changed = reduce(initial, { type: 'select', id: 'top-b' })
-  expect(initial.selected.tops).toBe('top-a')
-  expect(changed.selected.tops).toBe('top-b')
-})
-it('clears one slot without altering other slots', () => {
-  const state = { ...createOutfitState(catalog), selected: { tops: 'top-a', bottoms: 'pants', onepiece: null } }
-  const changed = reduce(state, { type: 'clear', slot: 'tops' })
-  expect(changed.selected).toEqual({ tops: null, bottoms: 'pants', onepiece: null })
-})
-</file>
+  const onAction = vi.fn()
 
-<file path="src/features/wardrobe/outfitState.ts">
-import { filterGarments, getGarmentSlot } from './garments'
-import type { Garment, GarmentFilter, GarmentSlot } from './garments'
-
-export interface OutfitState {
-  focus: GarmentSlot
-  filter: GarmentFilter
-  selected: Record<GarmentSlot, string | null>
-}
-
-export type OutfitAction =
-  | { type: 'focus'; slot: GarmentSlot }
-  | { type: 'filter'; filter: GarmentFilter }
-  | { type: 'select'; id: string }
-  | { type: 'cycle'; direction: 'next' | 'previous' }
-  | { type: 'clear'; slot: GarmentSlot }
-
-export function createOutfitState(catalog: readonly Garment[]): OutfitState {
-  return {
-    focus: 'tops',
-    filter: 'all',
-    selected: {
-      tops: catalog.find(item => getGarmentSlot(item.category) === 'tops')?.id ?? null,
-      bottoms: null,
-      onepiece: null,
-    },
-  }
-}
-
-export function getFocusedGarments(
-  state: OutfitState,
-  catalog: readonly Garment[],
-): readonly Garment[] {
-  return filterGarments(catalog, state.filter).filter(
-    item => getGarmentSlot(item.category) === state.focus,
+  render(
+    <OutfitSelector
+      state={state}
+      candidates={getFocusedGarments(state, catalog)}
+      worn={[catalog[0]]}
+      onAction={onAction}
+    />,
   )
-}
 
-export function getWornGarments(
-  state: OutfitState,
-  catalog: readonly Garment[],
-): readonly Garment[] {
-  const slots: GarmentSlot[] = state.selected.onepiece
-    ? ['onepiece']
-    : ['tops', 'bottoms']
-  return slots.flatMap(slot => {
-    const item = catalog.find(candidate => candidate.id === state.selected[slot])
-    return item && getGarmentSlot(item.category) === slot ? [item] : []
+  expect(screen.getAllByRole('tab')).toHaveLength(2)
+  expect(screen.getByRole('tab', { name: 'トップス' })).toBeInTheDocument()
+  expect(screen.getByRole('tab', { name: 'ボトムス' })).toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: 'ワンピース' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Dressを選ぶ' })).toBeInTheDocument()
+})
+
+it('dispatches bottoms focus from the two-tab UI', () => {
+  const state = createOutfitState(catalog)
+  const onAction = vi.fn()
+
+  render(
+    <OutfitSelector
+      state={state}
+      candidates={getFocusedGarments(state, catalog)}
+      worn={[catalog[0]]}
+      onAction={onAction}
+    />,
+  )
+
+  fireEvent.click(screen.getByRole('tab', { name: 'ボトムス' }))
+
+  expect(onAction).toHaveBeenCalledWith({
+    type: 'focus',
+    slot: 'bottoms',
   })
-}
-
-/** Pure, atomic transitions. Changing a browsing tab/filter does not undress. */
-export function reduceOutfit(
-  state: OutfitState,
-  action: OutfitAction,
-  catalog: readonly Garment[],
-): OutfitState {
-  if (action.type === 'focus') {
-    return action.slot === state.focus ? state : { ...state, focus: action.slot }
-  }
-  if (action.type === 'filter') {
-    return action.filter === state.filter ? state : { ...state, filter: action.filter }
-  }
-  if (action.type === 'clear') {
-    return state.selected[action.slot] === null ? state : {
-      ...state,
-      selected: { ...state.selected, [action.slot]: null },
-    }
-  }
-
-  const candidates = getFocusedGarments(state, catalog)
-  let item: Garment | undefined
-  if (action.type === 'select') {
-    item = candidates.find(candidate => candidate.id === action.id)
-  } else {
-    if (candidates.length === 0) return state
-    const current = candidates.findIndex(candidate => candidate.id === state.selected[state.focus])
-    const index = current < 0
-      ? (action.direction === 'next' ? 0 : candidates.length - 1)
-      : (current + (action.direction === 'next' ? 1 : -1) + candidates.length) % candidates.length
-    item = candidates[index]
-  }
-  if (!item) return state
-  const slot = getGarmentSlot(item.category)
-  if (state.selected[slot] === item.id) return state
-  return {
-    ...state,
-    selected: slot === 'onepiece'
-      ? { tops: null, bottoms: null, onepiece: item.id }
-      : { ...state.selected, [slot]: item.id, onepiece: null },
-  }
-}
+})
 </file>
 
 <file path="src/main.tsx">
@@ -1979,209 +1593,6 @@ engine-strict=true
   "semi": false,
   "trailingComma": "all"
 }
-</file>
-
-<file path="test-log.txt">
-> fitt-ar@0.1.0 test
-> vitest run
-
-
-[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90mC:/Users/user/riku/fitt-ar[39m
-
- [32m笨・[39m src/features/pose/poseSession.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 41[2mms[22m[39m
- [32m笨・[39m src/features/gesture/swipeDetector.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 37[2mms[22m[39m
- [32m笨・[39m src/features/gesture/swipeReplay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 44[2mms[22m[39m
- [32m笨・[39m src/features/pose/PoseDiagnostics.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 148[2mms[22m[39m
-node.exe : [90mstderr[2m | src/features/virtualTryO
-n/GarmentOverlay.test.tsx[2m > [22m[2mstarts hidde
-n, waits for fresh stable samples, and respects conta
-in bars
-発生場所 行:1 文字:1
-+ & "C:\Program Files\nodejs/node.exe" "C:\Program Fi
-les\nodejs/node_mo ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: ([90mst 
-   derr[2m...ts contain bars:String) [], RemoteExc  
-  eption
-    + FullyQualifiedErrorId : NativeCommandError
- 
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-The tag <ambientLight> is unrecognized in this browse
-r. If you meant to render a React component, start it
-s name with an uppercase letter.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-The tag <directionalLight> is unrecognized in this br
-owser. If you meant to render a React component, star
-t its name with an uppercase letter.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-The tag <primitive> is unrecognized in this browser. 
-If you meant to render a React component, start its n
-ame with an uppercase letter.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"visibility":0.49}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"presence":0.49}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"visibility":null}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"z":null}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mhides instead of applyi
-ng invalid shoulder data: {"x":1.1}
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2muses different hide/sho
-w thresholds to avoid rapid visibility toggles
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mrejects a depth-dominat
-ed shoulder vector even when its image width is large
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mpreserves depth sign an
-d computes roll using video pixels
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
-[90mstderr[2m | src/features/virtualTryOn/GarmentOv
-erlay.test.tsx[2m > [22m[2mclears null/stalled pos
-es, and never mirrors coordinates a second time
-[22m[39m<ambientLight /> is using incorrect casing.
- Use PascalCase for React components, or lowercase fo
-r HTML elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-<directionalLight /> is using incorrect casing. Use P
-ascalCase for React components, or lowercase for HTML
- elements.
-
- [32m笨・[39m src/features/virtualTryOn/GarmentOverlay.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 395[2mms[22m[39m
- [32m笨・[39m src/features/wardrobe/GarmentSelector.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[33m 720[2mms[22m[39m
-   [32m笨・[39m GarmentSelector [2m(2)[22m
-     [33m[2m笨・[22m[39m keeps category selection available when no garments match[33m 626[2mms[22m[39m
- [32m笨・[39m src/features/pose/poseChannel.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
- [32m笨・[39m src/features/virtualTryOn/garmentTransform.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 20[2mms[22m[39m
- [32m笨・[39m src/features/pose/poseLandmarker.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 24[2mms[22m[39m
- [32m笨・[39m src/features/pose/poseGeometry.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 22[2mms[22m[39m
- [32m笨・[39m src/features/wardrobe/garments.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 12[2mms[22m[39m
- [32m笨・[39m src/features/camera/CameraView.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[33m 5237[2mms[22m[39m
-   [32m笨・[39m CameraView [2m(20)[22m
-     [33m[2m笨・[22m[39m cycles all three garments with buttons and selects thumbnails without starting the camera[33m 1269[2mms[22m[39m
-     [33m[2m笨・[22m[39m filters thumbnails and buttons, keeping a matching selection or choosing the first match[33m 662[2mms[22m[39m
-     [33m[2m笨・[22m[39m cycles only matching garments by swipe in both directions without changing category or restarting inference[33m 431[2mms[22m[39m
-     [33m[2m笨・[22m[39m removes the previous overlay for an empty category and recovers without restarting inference[33m 385[2mms[22m[39m
-     [33m[2m笨・[22m[39m switches once from shared wrist frames without restarting inference, and honors gesture OFF[33m 306[2mms[22m[39m
-     [33m[2m笨・[22m[39m clears partial swipes on manual selection and mirror changes[33m 385[2mms[22m[39m
-     [33m[2m笨・[22m[39m starts only on request, asks for video without audio, and releases on stop[33m 403[2mms[22m[39m
-
-[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
-[2m      Tests [22m [1m[32m95 passed[39m[22m[90m (95)[39m
-[2m   Start at [22m 20:16:32
-[2m   Duration [22m 12.65s[2m (environment 70%, setup 14%, tests 10%, transform 5%, import 1%)[22m
-
-[2mEnvironment [22m [33mjsdom was created 12 times[39m[2m ﾂｷ 48.24s total, 70% of tracked time[22m
-[2m            [22m [2mcreate it once per worker with [22m[33mpool: 'vmThreads'[39m[2m (keeps per-file isolation) or [22m[33misolate: false[39m[2m (shares it across files)[22m
-[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-environments[22m
 </file>
 
 <file path="tsconfig.app.json">
@@ -2666,57 +2077,6 @@ export function createSwipeDetector(mirrored: boolean) {
 }
 </file>
 
-<file path="src/features/gesture/SwipeGesture.tsx">
-import { useEffect, useState } from 'react'
-import type { PoseSource } from '../pose/poseTypes'
-import { createSwipeDetector, type SwipeDirection } from './swipeDetector'
-
-export function SwipeGesture({
-  source,
-  mirrored,
-  resetKey,
-  onSwipe,
-}: {
-  source: PoseSource
-  mirrored: boolean
-  resetKey: number
-  onSwipe: (direction: SwipeDirection) => void
-}) {
-  const [message, setMessage] = useState('両肩と手首を画面に映してください')
-  useEffect(() => {
-    const detector = createSwipeDetector(mirrored)
-    let lastMessage = ''
-    let lastDirection: SwipeDirection | undefined
-    return source.subscribe((frame) => {
-      const { state, direction } = detector.push(frame)
-      if (direction) {
-        lastDirection = direction
-        onSwipe(direction)
-      }
-      const next =
-        state === 'searching'
-          ? '両肩を画面に映してください'
-          : state === 'hand-missing'
-            ? '手首をカメラに見せてください'
-            : state === 'cooldown'
-              ? `${lastDirection === 'next' ? '← 次の服へ' : '前の服へ →'} · 手を少し止めると次の操作ができます`
-              : state === 'ready'
-                ? '手を横へスワイプ · ← 次の服 ／ 前の服 →'
-                : '片手を胸の高さに上げてください'
-      if (next !== lastMessage) {
-        lastMessage = next
-        setMessage(next)
-      }
-    })
-  }, [source, mirrored, resetKey, onSwipe])
-  return (
-    <p className="gesture-status" role="status">
-      {message}
-    </p>
-  )
-}
-</file>
-
 <file path="src/features/pose/poseLandmarker.ts">
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
 import type { PoseDetector } from './poseSession'
@@ -2791,291 +2151,545 @@ export function PoseOverlay({ source }: { source: PoseSource }) {
 }
 </file>
 
-<file path="src/features/virtualTryOn/GarmentOverlay.switching.test.tsx">
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+<file path="src/features/virtualTryOn/GarmentOverlay.categories.test.tsx">
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { useFrame } from '@react-three/fiber'
+import type { RootState } from '@react-three/fiber'
 import * as THREE from 'three'
 import { clone } from 'three/addons/utils/SkeletonUtils.js'
-import { GarmentOverlay } from './GarmentOverlay'
-import { CameraView } from '../camera/CameraView'
-import { startPoseSession } from '../pose/poseSession'
 import { createPoseChannel } from '../pose/poseChannel'
-import { DEFAULT_GARMENT_MODEL_URL, demoGarment, garments, getGarmentSlot } from '../wardrobe/garments'
-import type { Garment } from '../wardrobe/garments'
-import { makeSwipeFrame } from '../../test/swipeFixture'
+import type { PoseFrame, PosePoint } from '../pose/poseTypes'
+import { demoGarment } from '../wardrobe/garments'
+import type { Garment, GarmentCategory } from '../wardrobe/garments'
+import { GarmentOverlay } from './GarmentOverlay'
 
-const harness = vi.hoisted(() => ({
-  load: vi.fn(),
-  clear: vi.fn(),
-  canvasMount: vi.fn(),
-  canvasUnmount: vi.fn(),
-}))
-
-// Test the actual selection/loading/lifecycle logic without a WebGL renderer.
+const harness = vi.hoisted(() => ({ load: vi.fn(), clear: vi.fn() }))
 vi.mock('@react-three/fiber', async () => {
-  const { createElement, Fragment, useEffect } = await import('react')
+  const { createElement, Fragment } = await import('react')
   return {
-    Canvas: function CanvasDouble({ children }: { children: ReactNode }) {
-      useEffect(() => {
-        harness.canvasMount()
-        return () => { harness.canvasUnmount() }
-      }, [])
-      return createElement(Fragment, null, children)
-    },
+    Canvas: ({ children }: { children: ReactNode }) => createElement(Fragment, null, children),
     useFrame: vi.fn(),
   }
 })
-vi.mock('@react-three/drei', () => ({
-  useGLTF: Object.assign(harness.load, { clear: harness.clear }),
+vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(harness.load, { clear: harness.clear }) }))
+vi.mock('three/addons/utils/SkeletonUtils.js', async importOriginal => {
+  const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
+  return { ...original, clone: vi.fn(original.clone) }
+})
+
+let now = 1000
+let size = { width: 640, height: 480 }
+let camera: THREE.PerspectiveCamera
+let masks: THREE.Group | null = null
+const geometries: THREE.BufferGeometry[] = []
+const materials: THREE.Material[] = []
+const inheritedAdd = THREE.Object3D.prototype.add
+
+function fixture(category: GarmentCategory, markers = true) {
+  const scene = new THREE.Group()
+  scene.position.set(40, -25, 50)
+  const bottom = category === 'bottoms', dress = category === 'onepiece'
+  const geometry = new THREE.BoxGeometry(1.6, dress ? 3.4 : 1.7, 0.2)
+  const material = new THREE.MeshStandardMaterial()
+  geometries.push(geometry); materials.push(material)
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.name = 'CategoryCloth'
+  scene.add(mesh)
+  if (markers) {
+    for (const [name, x, y] of [
+      ['AR_LeftShoulder', 0.5, 0.7], ['AR_RightShoulder', -0.5, 0.7],
+      ['AR_LeftHip', 0.5, bottom ? 0.7 : -0.8], ['AR_RightHip', -0.5, bottom ? 0.7 : -0.8],
+    ] as const) {
+      const marker = new THREE.Object3D()
+      marker.name = name; marker.position.set(x, y, 0); scene.add(marker)
+    }
+  }
+  return scene
+}
+function frame(): PoseFrame {
+  const landmarks: PosePoint[] = Array.from({ length: 33 }, () => ({ x: 0, y: 0, z: 0, visibility: 0 }))
+  for (const [index, x, y] of [
+    [11, 0.65, 0.20], [12, 0.35, 0.20],
+    [13, 0.73, 0.32], [14, 0.27, 0.32],
+    [15, 0.68, 0.45], [16, 0.32, 0.45],
+    [23, 0.61, 0.53], [24, 0.39, 0.53],
+    [25, 0.61, 0.72], [26, 0.39, 0.72],
+    [27, 0.61, 0.93], [28, 0.39, 0.93],
+  ]) landmarks[index] = { x, y, z: 0, visibility: 1 }
+  return { width: 720, height: 1280, timestamp: now, landmarks }
+}
+function asset() {
+  const result = vi.mocked(clone).mock.results.at(-1)
+  if (!result || result.type !== 'return') throw new Error('No cloned fixture')
+  return result.value as THREE.Object3D
+}
+function root() {
+  let object: THREE.Object3D | null = asset()
+  while (object && object.name !== 'AR_GarmentRoot') object = object.parent
+  if (!object) throw new Error('Missing garment root')
+  return object
+}
+function maskRoot(): THREE.Group {
+  if (!masks) throw new Error('Missing occluder group')
+  return masks
+}
+function draw(dt = 1 / 60) {
+  const callback = vi.mocked(useFrame).mock.calls.at(-1)?.[0]
+  if (!callback) throw new Error('No frame callback')
+  camera.aspect = size.width / size.height
+  camera.updateProjectionMatrix()
+  act(() => callback({ camera, size } as RootState, dt))
+}
+function emit(source: ReturnType<typeof createPoseChannel>, pose: PoseFrame | null) {
+  now += 80
+  act(() => source.publish(pose ? { ...pose, timestamp: now } : null))
+  draw()
+}
+function acquire(source: ReturnType<typeof createPoseChannel>, pose = frame()) {
+  for (let i = 0; i < 6; i++) emit(source, pose)
+}
+function setup(category: GarmentCategory, markers = true, extra: Partial<Garment> = {}) {
+  const scene = fixture(category, markers)
+  harness.load.mockReturnValue({ scene })
+  const source = createPoseChannel()
+  const garment: Garment = {
+    ...demoGarment,
+    id: category,
+    category,
+    ...extra,
+    // These category tests validate the body-fit projection itself. The
+    // production bottoms layer intentionally adds a small negative Z offset
+    // so tops render in front at the waist. Neutralize only that visual
+    // layering here; GarmentOverlay.outfit.test.tsx covers the real Z-order.
+    fit3D: {
+      ...demoGarment.fit3D,
+      layerOffsetZ: 0,
+      ...extra.fit3D,
+    },
+  }
+  const view = render(<GarmentOverlay source={source} garment={garment} mirrored />)
+  return { source, view, garment }
+}
+function expectMarkerFits(pose: PoseFrame, name: string, index: number) {
+  root().updateMatrixWorld(true)
+  const marker = asset().getObjectByName(name)
+  if (!marker) throw new Error('Missing marker')
+  const projected = marker.getWorldPosition(new THREE.Vector3()).project(camera)
+  const fit = Math.min(size.width / pose.width, size.height / pose.height)
+  const expected = new THREE.Vector2(
+    (size.width - pose.width * fit) / 2 + pose.landmarks[index].x * pose.width * fit,
+    (size.height - pose.height * fit) / 2 + pose.landmarks[index].y * pose.height * fit,
+  )
+  expect(new THREE.Vector2((projected.x + 1) * size.width / 2,
+    (1 - projected.y) * size.height / 2).distanceTo(expected)).toBeLessThan(1e-7)
+}
+
+function rememberOccluderRoot(group: THREE.Group) {
+  masks = group
+}
+
+beforeEach(() => {
+  now = 1000; size = { width: 640, height: 480 }; masks = null
+  camera = new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 100)
+  camera.position.z = 5; camera.updateMatrixWorld(true)
+  vi.useFakeTimers()
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  vi.mocked(useFrame).mockClear(); vi.mocked(clone).mockClear()
+  harness.load.mockReset(); harness.clear.mockReset()
+  // Observe CPU scene construction, not private React DOM internals.
+  vi.spyOn(THREE.Group.prototype, 'add').mockImplementation(function (
+    this: THREE.Group, ...objects: THREE.Object3D[]
+  ) {
+    if (this.name === 'AR_Occluders') rememberOccluderRoot(this)
+    inheritedAdd.apply(this, objects)
+    return this
+  })
+})
+afterEach(() => {
+  cleanup()
+  geometries.splice(0).forEach(geometry => geometry.dispose())
+  materials.splice(0).forEach(material => material.dispose())
+  vi.restoreAllMocks(); vi.useRealTimers()
+})
+
+it.each(['tshirt', 'bottoms', 'onepiece'] as const)(
+  'fits the category-specific anchors through landscape and portrait contain: %s', category => {
+    for (const canvas of [{ width: 640, height: 480 }, { width: 480, height: 800 }]) {
+      size = canvas
+      for (const dimensions of [[720, 1280], [1280, 720]]) {
+        const state = setup(category)
+        const pose = { ...frame(), width: dimensions[0], height: dimensions[1] }
+        acquire(state.source, pose)
+        expect(root().visible).toBe(true)
+        const hip = category === 'bottoms'
+        expectMarkerFits(pose, hip ? 'AR_LeftHip' : 'AR_LeftShoulder', hip ? 23 : 11)
+        expectMarkerFits(pose, hip ? 'AR_RightHip' : 'AR_RightShoulder', hip ? 24 : 12)
+        state.view.unmount()
+      }
+    }
+  },
+)
+it('fits bottoms with missing shoulders instead of reusing a shoulder pose', () => {
+  const { source } = setup('bottoms')
+  const pose = frame()
+  pose.landmarks[11].visibility = 0; pose.landmarks[12].visibility = 0
+  acquire(source, pose)
+  expect(root().visible).toBe(true)
+  expectMarkerFits(pose, 'AR_LeftHip', 23)
+  expectMarkerFits(pose, 'AR_RightHip', 24)
+})
+it('freezes and fades bottoms when hips disappear even though shoulders remain valid', () => {
+  const { source } = setup('bottoms')
+  acquire(source)
+  const position = root().position.clone()
+  const missing = frame(); missing.landmarks[23].visibility = 0
+  emit(source, missing)
+  expect(root().position.equals(position)).toBe(true)
+  draw(0.5)
+  expect(root().visible).toBe(false)
+})
+it('retains uniform dress scale when GLB hip markers are absent', () => {
+  const { source } = setup('onepiece', false)
+  acquire(source)
+  expect(root().visible).toBe(true)
+  expect(root().scale.x).toBeCloseTo(root().scale.y, 10)
+})
+it('uses real dress hip markers for bounded length adjustment without moving shoulder anchors', () => {
+  const { source } = setup('onepiece')
+  const pose = frame()
+  acquire(source, pose)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1.25, 8)
+  expectMarkerFits(pose, 'AR_LeftShoulder', 11)
+  expectMarkerFits(pose, 'AR_RightShoulder', 12)
+})
+it('allows a dress to explicitly retain uniform authored proportions', () => {
+  const { source } = setup('onepiece', true, { fit3D: { fitTorsoLength: false } })
+  acquire(source)
+  expect(root().scale.y).toBeCloseTo(root().scale.x, 8)
+})
+it('uses hip fallback calibration without requiring marker nodes', () => {
+  const { source } = setup('bottoms', false)
+  acquire(source)
+  expect(root().visible).toBe(true)
+  expect(Number.isFinite(root().scale.x)).toBe(true)
+})
+it('lerps a changed pelvis width instead of snapping', () => {
+  const { source } = setup('bottoms')
+  acquire(source)
+  const initial = root().scale.x
+  const closer = frame()
+  closer.landmarks[23].x = 0.72; closer.landmarks[24].x = 0.28
+  emit(source, closer)
+  expect(root().scale.x).toBeCloseTo(initial * (2 - Math.exp(-14 / 60)), 8)
+})
+it.each([
+  ['tshirt', ['upper', 'forearm']],
+  ['bottoms', ['thigh', 'shin']],
+  ['onepiece', ['upper', 'forearm', 'thigh', 'shin']],
+] as const)('constructs only the correct occluder types for %s', (category, kinds) => {
+  setup(category)
+  expect(maskRoot().children.map(object => object.name).sort()).toEqual(
+    kinds.flatMap(kind => [`AR_left_${kind}`, `AR_right_${kind}`]).sort(),
+  )
+  let depth = 0, shadow = 0
+  maskRoot().traverse(object => {
+    if (!(object instanceof THREE.Mesh) || Array.isArray(object.material)) return
+    if (object.material instanceof THREE.ShadowMaterial) {
+      shadow += 1
+      expect(object.receiveShadow).toBe(true)
+    } else {
+      depth += 1
+      expect(object.material.colorWrite).toBe(false)
+      expect(object.material.depthWrite).toBe(true)
+    }
+  })
+  expect(depth).toBe(kinds.length * 6)
+  expect(shadow).toBe(depth)
+})
+it('updates leg masks and disables only the unreliable segment', () => {
+  const { source } = setup('bottoms')
+  const pose = frame()
+  pose.landmarks[25].z = -0.055; pose.landmarks[27].z = -0.077
+  acquire(source, pose)
+  const thigh = maskRoot().getObjectByName('AR_left_thigh')!
+  const shin = maskRoot().getObjectByName('AR_left_shin')!
+  expect(thigh.visible).toBe(true); expect(shin.visible).toBe(true)
+  const badAnkle = { ...pose, landmarks: pose.landmarks.map(p => ({ ...p })) }
+  badAnkle.landmarks[27].visibility = 0
+  emit(source, badAnkle)
+  expect(thigh.visible).toBe(true); expect(shin.visible).toBe(false)
+  expect(root().visible).toBe(true)
+})
+it('permits per-garment covered-segment masks to be disabled', () => {
+  setup('bottoms', true, { occlusion3D: { thigh: { enabled: false } } })
+  expect(maskRoot().children.map(object => object.name).sort()).toEqual(['AR_left_shin', 'AR_right_shin'])
+})
+it('clears old masks on category switch without replacing the pose subscription', () => {
+  const initial = setup('bottoms')
+  const subscribe = vi.spyOn(initial.source, 'subscribe')
+  const old = maskRoot()
+  acquire(initial.source)
+  const newGarment: Garment = { ...initial.garment, category: 'tshirt' }
+  harness.load.mockReturnValue({ scene: fixture('tshirt') })
+  initial.view.rerender(<GarmentOverlay source={initial.source} garment={newGarment} mirrored />)
+  expect(subscribe).not.toHaveBeenCalled()
+  expect(old.visible).toBe(false)
+  expect(maskRoot()).not.toBe(old)
+  expect(maskRoot().children.some(object => object.name.includes('thigh'))).toBe(false)
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-fit-axis', 'shoulders')
+})
+</file>
+
+<file path="src/features/virtualTryOn/GarmentOverlay.outfit.test.tsx">
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
+import { useFrame } from '@react-three/fiber'
+import type { RootState } from '@react-three/fiber'
+import * as THREE from 'three'
+import { clone } from 'three/addons/utils/SkeletonUtils.js'
+import { GarmentOverlay } from './GarmentOverlay'
+import { demoGarment } from '../wardrobe/garments'
+import type { Garment } from '../wardrobe/garments'
+import { createPoseChannel } from '../pose/poseChannel'
+import { makePoseFrame } from '../../test/poseFixture'
+
+const harness = vi.hoisted(() => ({
+  load: vi.fn(), clear: vi.fn(), mount: vi.fn(), unmount: vi.fn(),
+  frames: new Set<(state: RootState, delta: number) => void>(),
 }))
+vi.mock('@react-three/fiber', async () => {
+  const { createElement, Fragment, useEffect, useLayoutEffect, useRef } = await import('react')
+  function useFrameDouble(callback: Parameters<typeof useFrame>[0]) {
+    const current = useRef(callback)
+    useLayoutEffect(() => { current.current = callback })
+    useEffect(() => {
+      const tick = (state: RootState, delta: number) => current.current(state, delta)
+      harness.frames.add(tick)
+      return () => { harness.frames.delete(tick) }
+    }, [])
+  }
+  return {
+    Canvas: function CanvasDouble({ children }: { children: ReactNode }) {
+      useEffect(() => { harness.mount(); return () => { harness.unmount() } }, [])
+      return createElement(Fragment, null, children)
+    },
+    useFrame: vi.fn(useFrameDouble),
+  }
+})
+vi.mock('@react-three/drei', () => ({ useGLTF: Object.assign(harness.load, { clear: harness.clear }) }))
 vi.mock('three/addons/utils/SkeletonUtils.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
   return { ...original, clone: vi.fn(original.clone) }
 })
-vi.mock('../pose/poseSession', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../pose/poseSession')>()),
-  startPoseSession: vi.fn(() => vi.fn()),
-}))
-vi.mock('../wardrobe/garments', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../wardrobe/garments')>()
 
-  return {
-    ...original,
-    // Keep named exports explicit so GarmentOverlay can import the default GLB
-    // constant from this mocked module without Vitest reporting a missing export.
-    DEFAULT_GARMENT_MODEL_URL: original.DEFAULT_GARMENT_MODEL_URL,
-    demoGarment: original.demoGarment,
-    filterGarments: original.filterGarments,
-    garmentGenderLabels: original.garmentGenderLabels,
-
-    // Distinct, mocked GLB assets; no claim that these files exist on disk.
-    garments: original.garments.map((garment) => ({
-      ...garment,
-      modelUrl: `/switch-fixture/${garment.id}.glb`,
-    })),
-  }
-})
-
-type Resource =
-  | { kind: 'ready'; scene: THREE.Group }
-  | { kind: 'pending'; promise: Promise<void> }
-  | { kind: 'error'; error: Error }
-
-const resources = new Map<string, Resource>()
-const fixtures: THREE.Mesh[] = []
+const cache = new Map<string, THREE.Group | Error>()
+const owned: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = []
 let now = 1000
+const size = { width: 640, height: 480 }
+let camera: THREE.PerspectiveCamera
 
-function ready(url: string) {
+function ready(id: string, category: Garment['category'] = 'tshirt', markers = true): Garment {
+  const modelUrl = `/outfit-test/${id}.glb`
   const scene = new THREE.Group()
-  scene.name = url
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1.6, 1.7, 0.2),
-    new THREE.MeshStandardMaterial(),
-  )
-  mesh.name = 'SwitchFixtureCloth'
-  fixtures.push(mesh)
-  const left = new THREE.Object3D()
-  const right = new THREE.Object3D()
-  left.name = 'AR_LeftShoulder'
-  right.name = 'AR_RightShoulder'
-  left.position.set(0.5, 0.7, 0)
-  right.position.set(-0.5, 0.7, 0)
-  scene.add(mesh, left, right)
-  resources.set(url, { kind: 'ready', scene })
-  return scene
-}
-
-function pending(url: string) {
-  let resolve!: () => void
-  const promise = new Promise<void>((done) => { resolve = done })
-  resources.set(url, { kind: 'pending', promise })
-  return () => {
-    ready(url)
-    resolve()
+  scene.name = id
+  scene.position.set(40, -25, 50)
+  const geometry = new THREE.BoxGeometry(1.6, 1.7, 0.2)
+  const material = new THREE.MeshStandardMaterial()
+  owned.push({ geometry, material })
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.name = 'Cloth'
+  scene.add(mesh)
+  if (markers) {
+    for (const [name, x] of [[category === 'bottoms' ? 'AR_LeftHip' : 'AR_LeftShoulder', 0.5],
+      [category === 'bottoms' ? 'AR_RightHip' : 'AR_RightShoulder', -0.5]] as const) {
+      const marker = new THREE.Object3D()
+      marker.name = name; marker.position.set(x, 0.7, 0)
+      scene.add(marker)
+    }
   }
+  cache.set(modelUrl, scene)
+  return { ...demoGarment, id, name: id, category, modelUrl }
 }
-
-function garment(id: string, modelUrl: string): Garment {
-  return { ...demoGarment, id, name: `Fixture ${id}`, modelUrl }
-}
-
-function latestAsset(): THREE.Object3D {
-  const result = vi.mocked(clone).mock.results.at(-1)
-  if (!result || result.type !== 'return') throw new Error('No cloned GLB')
+function asset(id: string): THREE.Object3D {
+  const result = [...vi.mocked(clone).mock.results].reverse().find(r => r.type === 'return' && r.value.name === id)
+  if (!result || result.type !== 'return') throw new Error(`Missing asset ${id}`)
   return result.value
 }
-
-function localMaterial(asset: THREE.Object3D): THREE.Material {
-  const mesh = asset.getObjectByName('SwitchFixtureCloth')
-  if (!(mesh instanceof THREE.Mesh) || Array.isArray(mesh.material)) {
-    throw new Error('Missing fixture material')
-  }
+function root(id: string): THREE.Object3D {
+  let object: THREE.Object3D | null = asset(id)
+  while (object && object.name !== 'AR_GarmentRoot') object = object.parent
+  if (!object) throw new Error('Missing root')
+  return object
+}
+function material(id: string): THREE.Material {
+  const mesh = asset(id).getObjectByName('Cloth')
+  if (!(mesh instanceof THREE.Mesh) || Array.isArray(mesh.material)) throw new Error('Missing material')
   return mesh.material
 }
-
+function acquire(source: ReturnType<typeof createPoseChannel>) {
+  for (let i = 0; i < 3; i++) {
+    now += 80
+    act(() => source.publish({ ...makePoseFrame(), timestamp: now }))
+    if (harness.frames.size === 0) throw new Error('Missing frame callback')
+    act(() => {
+      for (const callback of harness.frames) callback({ camera, size } as RootState, 1 / 60)
+    })
+  }
+}
 beforeEach(() => {
   now = 1000
   vi.useFakeTimers()
   vi.spyOn(performance, 'now').mockImplementation(() => now)
+  camera = new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 100)
+  camera.position.z = 5; camera.updateMatrixWorld(true)
   harness.load.mockReset().mockImplementation((url: string) => {
-    const resource = resources.get(url)
-    if (!resource) throw new Error(`Missing fixture: ${url}`)
-    if (resource.kind === 'pending') throw resource.promise
-    if (resource.kind === 'error') throw resource.error
-    return { scene: resource.scene }
+    const scene = cache.get(url)
+    if (!scene || scene instanceof Error) throw scene ?? new Error('Missing model')
+    return { scene }
   })
   harness.clear.mockReset()
-  harness.canvasMount.mockClear()
-  harness.canvasUnmount.mockClear()
-  vi.mocked(clone).mockClear()
-  vi.mocked(startPoseSession).mockClear()
-  ready(DEFAULT_GARMENT_MODEL_URL)
+  harness.mount.mockClear(); harness.unmount.mockClear(); harness.frames.clear()
+  vi.mocked(clone).mockClear(); vi.mocked(useFrame).mockClear()
 })
-
 afterEach(() => {
   cleanup()
-  for (const mesh of fixtures) {
-    mesh.geometry.dispose()
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    materials.forEach((material) => material.dispose())
-  }
-  fixtures.length = 0
-  resources.clear()
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
+  owned.forEach(item => { item.geometry.dispose(); item.material.dispose() })
+  owned.length = 0; cache.clear()
+  vi.restoreAllMocks(); vi.useRealTimers()
 })
 
-it('loads the selected URL, disposes the old instance, and preserves Canvas and the pose subscription', () => {
-  const a = garment('a', '/switch-fixture/a.glb')
-  const b = garment('b', '/switch-fixture/b.glb')
-  const cachedA = ready(a.modelUrl!)
-  ready(b.modelUrl!)
-  const cachedMaterial = localMaterial(cachedA)
-  const sharedDispose = vi.spyOn(cachedMaterial, 'dispose')
+it('renders two garments in ONE Canvas with ONE pose subscription', () => {
+  const top = ready('top'), pants = ready('pants', 'bottoms')
   const source = createPoseChannel()
   const subscribe = vi.spyOn(source, 'subscribe')
-  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
-  const oldAsset = latestAsset()
-  const dispose = vi.spyOn(localMaterial(oldAsset), 'dispose')
-
-  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
-
-  expect(harness.load).toHaveBeenLastCalledWith(b.modelUrl)
-  expect(latestAsset().name).toBe(b.modelUrl)
-  expect(latestAsset()).not.toBe(oldAsset)
-  expect(dispose).toHaveBeenCalledOnce()
-  expect(sharedDispose).not.toHaveBeenCalled()
-  expect(cachedA.parent).toBeNull()
+  render(<GarmentOverlay source={source} garments={[top, pants]} mirrored />)
+  expect(asset('top')).not.toBe(asset('pants'))
+  expect(root('top')).not.toBe(root('pants'))
+  acquire(source)
+  expect(root('top').visible).toBe(true)
+  expect(root('pants').visible).toBe(true)
+  expect(harness.mount).toHaveBeenCalledOnce()
   expect(subscribe).toHaveBeenCalledOnce()
-  expect(harness.canvasMount).toHaveBeenCalledOnce()
-  expect(harness.canvasUnmount).not.toHaveBeenCalled()
-  expect(harness.clear).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-urls', JSON.stringify([top.modelUrl, pants.modelUrl]))
 })
 
-it('reloads the selected instance when its URL changes without changing garment id', () => {
-  const a = garment('same-id', '/switch-fixture/a.glb')
-  const b = garment('same-id', '/switch-fixture/b.glb')
-  ready(a.modelUrl!)
-  ready(b.modelUrl!)
-  const source = createPoseChannel()
-  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
-  const first = latestAsset()
-  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
-  expect(latestAsset()).not.toBe(first)
-  expect(latestAsset().name).toBe(b.modelUrl)
-  expect(harness.canvasMount).toHaveBeenCalledOnce()
+it('keeps tops in front of bottoms at the outfit overlap boundary', () => {
+  const top = ready('top')
+  const pants = ready('pants', 'bottoms')
+
+  render(
+    <GarmentOverlay
+      source={createPoseChannel()}
+      garments={[top, pants]}
+      mirrored
+    />,
+  )
+
+  const topRoot = root('top')
+  const bottomRoot = root('pants')
+
+  const topVisual = topRoot.getObjectByName('AR_GarmentCalibration')
+  const bottomVisual = bottomRoot.getObjectByName('AR_GarmentCalibration')
+
+  if (!topVisual || !bottomVisual) {
+    throw new Error('Missing garment calibration group')
+  }
+
+  // Camera is on +Z looking toward the origin. A more-negative local Z puts
+  // the bottom farther behind its body-fit plane, while the top stays neutral.
+  expect(topVisual.position.z).toBeGreaterThan(bottomVisual.position.z)
+
+  // Opaque overlap is primarily depth-tested; renderOrder makes transparent
+  // fade/switch frames deterministic as well.
+  expect(topRoot.renderOrder).toBeGreaterThan(bottomRoot.renderOrder)
 })
 
-it('does not resurrect a slow previous selection after a newer GLB has loaded', async () => {
-  const a = garment('a', '/switch-fixture/a.glb')
-  const b = garment('b', '/switch-fixture/b.glb')
-  const c = garment('c', '/switch-fixture/c.glb')
-  ready(a.modelUrl!)
-  const finishB = pending(b.modelUrl!)
-  ready(c.modelUrl!)
+it('switches only the bottom instance, preserving the top and Canvas', () => {
+  const top = ready('top'), pants = ready('pants', 'bottoms'), skirt = ready('skirt', 'bottoms')
   const source = createPoseChannel()
-  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
-  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
-  expect(screen.getByText('3Dモデルを読み込んでいます…')).toBeInTheDocument()
-  view.rerender(<GarmentOverlay source={source} garment={c} mirrored />)
-  const latest = latestAsset()
-  await act(async () => { finishB() })
-  expect(latestAsset()).toBe(latest)
-  expect(latest.name).toBe(c.modelUrl)
-  expect(screen.queryByText('3Dモデルを読み込んでいます…')).not.toBeInTheDocument()
-  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-url', c.modelUrl)
-  expect(harness.canvasMount).toHaveBeenCalledOnce()
+  const view = render(<GarmentOverlay source={source} garments={[top, pants]} mirrored />)
+  const oldTop = asset('top')
+  const topDispose = vi.spyOn(material('top'), 'dispose')
+  const bottomDispose = vi.spyOn(material('pants'), 'dispose')
+  view.rerender(<GarmentOverlay source={source} garments={[top, skirt]} mirrored />)
+  expect(asset('top')).toBe(oldTop)
+  expect(topDispose).not.toHaveBeenCalled()
+  expect(bottomDispose).toHaveBeenCalledOnce()
+  expect(asset('skirt').name).toBe('skirt')
+  expect(harness.mount).toHaveBeenCalledOnce()
+  expect(harness.unmount).not.toHaveBeenCalled()
 })
 
-it('can select another GLB after a load error without recreating Canvas', () => {
-  const initial = garment('initial', '/switch-fixture/initial.glb')
-  ready(initial.modelUrl!)
-  const a = garment('broken', '/switch-fixture/broken.glb')
-  const b = garment('good', '/switch-fixture/good.glb')
-  resources.set(a.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
-  ready(b.modelUrl!)
+it('isolates a bottom load error and retries it without disposing the top', () => {
+  const top = ready('top'), broken = ready('broken', 'bottoms')
   const source = createPoseChannel()
-  const view = render(<GarmentOverlay source={source} garment={initial} mirrored />)
-  view.rerender(<GarmentOverlay source={source} garment={a} mirrored />)
+  const view = render(<GarmentOverlay source={source} garments={[top]} mirrored />)
+  const topDispose = vi.spyOn(material('top'), 'dispose')
+  cache.set(broken.modelUrl!, new Error('Intentional failure'))
+  view.rerender(<GarmentOverlay source={source} garments={[top, broken]} mirrored />)
+  harness.clear.mockImplementation(() => { ready('broken', 'bottoms') })
+  fireEvent.click(screen.getByRole('button', { name: 'brokenの3Dモデルを再読み込み' }))
+  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(broken.modelUrl)
+  expect(topDispose).not.toHaveBeenCalled()
+  expect(harness.mount).toHaveBeenCalledOnce()
+})
+
+it('defensively makes onepiece exclusive even though it belongs to the tops UI slot', () => {
+  const top = ready('top'), pants = ready('pants', 'bottoms'), dress = ready('dress', 'onepiece')
+  render(<GarmentOverlay source={createPoseChannel()} garments={[top, pants, dress]} mirrored />)
+  expect(harness.load).toHaveBeenCalledWith(dress.modelUrl)
+  expect(harness.load).not.toHaveBeenCalledWith(top.modelUrl)
+  expect(harness.load).not.toHaveBeenCalledWith(pants.modelUrl)
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute(
+    'data-model-url',
+    dress.modelUrl,
+  )
+})
+
+it('keeps visual scale and offsets separate from the fitted root', () => {
+  const plain = ready('plain')
+  const source = createPoseChannel()
+  const first = render(<GarmentOverlay source={source} garment={plain} mirrored />)
+  acquire(source)
+  const position = root('plain').position.clone()
+  const scale = root('plain').scale.clone()
+  first.unmount()
+  const calibrated = { ...ready('calibrated'), fit3D: { scaleX: 1.4, scaleY: 1.1, offsetY: 0.10 } }
+  render(<GarmentOverlay source={source} garment={calibrated} mirrored />)
+  acquire(source)
+  expect(root('calibrated').position.distanceTo(position)).toBeLessThan(1e-10)
+  expect(root('calibrated').scale.distanceTo(scale)).toBeLessThan(1e-10)
+  const visual = root('calibrated').getObjectByName('AR_GarmentCalibration')
+  if (!visual) throw new Error('Missing calibration group')
+  expect(visual.scale.toArray()).toEqual([1.4, 1.1, 1])
+  expect(visual.position.toArray()).toEqual([0, 0.10, 0])
+})
+
+it('halving a fallback anchorSpan doubles displayed width without changing tracking scale', () => {
+  function measure(span: number, id: string) {
+    const garment = { ...ready(id, 'bottoms', false), fit3D: { anchorSpan: span } }
+    const source = createPoseChannel()
+    const view = render(<GarmentOverlay source={source} garment={garment} mirrored />)
+    acquire(source)
+    const object = root(id)
+    object.updateMatrixWorld(true)
+    const width = new THREE.Box3().setFromObject(object, true).getSize(new THREE.Vector3()).x
+    const scale = object.scale.x
+    view.unmount()
+    return { width, scale }
+  }
+  const a = measure(0.6, 'a'), b = measure(0.3, 'b')
+  expect(b.scale).toBeCloseTo(a.scale, 10)
+  expect(b.width / a.width).toBeCloseTo(2, 10)
+})
+
+it('rejects invalid calibration instead of rendering NaN or collapsed geometry', () => {
+  const garment = { ...ready('invalid'), fit3D: { scaleY: 0 } }
+  render(<GarmentOverlay source={createPoseChannel()} garment={garment} mirrored />)
   expect(screen.getByRole('button', { name: '3Dモデルを再読み込み' })).toBeInTheDocument()
-  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
-  expect(latestAsset().name).toBe(b.modelUrl)
-  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
-  expect(harness.canvasMount).toHaveBeenCalledOnce()
-})
-
-it('retries only the selected failed URL, not the default or other cached GLBs', () => {
-  const selected = garment('broken', '/switch-fixture/broken.glb')
-  resources.set(selected.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
-  harness.clear.mockImplementation((url: string) => { ready(url) })
-  const source = createPoseChannel()
-  render(<GarmentOverlay source={source} garment={selected} mirrored />)
-  fireEvent.click(screen.getByRole('button', { name: '3Dモデルを再読み込み' }))
-  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(selected.modelUrl)
-  expect(latestAsset().name).toBe(selected.modelUrl)
-  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
-})
-
-it('keeps legacy 2D fixtures usable without a modelUrl property', () => {
-  const legacy = { ...demoGarment, modelUrl: undefined }
-  render(<GarmentOverlay source={createPoseChannel()} garment={legacy} mirrored />)
-  expect(harness.load).toHaveBeenLastCalledWith(DEFAULT_GARMENT_MODEL_URL)
-})
-
-it('routes a real wrist swipe through CameraView to another GLB without restarting inference', async () => {
-  for (const item of garments) ready(item.modelUrl!)
-  const stop = vi.fn()
-  const track = { stop, onended: null as (() => void) | null }
-  const stream = {
-    getTracks: () => [track],
-    getVideoTracks: () => [track],
-  } as unknown as MediaStream
-  const getUserMedia = vi.fn().mockResolvedValue(stream)
-  vi.stubGlobal('isSecureContext', true)
-  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
-  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
-  render(<CameraView />)
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
-  })
-  expect(startPoseSession).toHaveBeenCalledOnce()
-  const call = vi.mocked(startPoseSession).mock.calls[0]
-  if (!call) throw new Error('Pose session did not start')
-  const publish = call[1].onFrame
-  act(() => {
-    for (const x of [-0.5, -0.2, 0.1, 0.4]) {
-      now += 80
-      publish(makeSwipeFrame(now, x))
-    }
-  })
-  expect(screen.getByText(`2 / ${garments.filter(item => getGarmentSlot(item.category) === 'tops').length}`)).toBeInTheDocument()
-  expect(harness.load).toHaveBeenLastCalledWith(garments[1].modelUrl)
-  expect(latestAsset().name).toBe(garments[1].modelUrl)
-  expect(startPoseSession).toHaveBeenCalledOnce()
-  expect(getUserMedia).toHaveBeenCalledOnce()
-  expect(harness.canvasMount).toHaveBeenCalledOnce()
 })
 </file>
 
@@ -3194,85 +2808,6 @@ describe('garment placement', () => {
 })
 </file>
 
-<file path="src/features/wardrobe/garments.test.ts">
-import { describe, expect, it } from 'vitest'
-import {
-  DEFAULT_GARMENT_MODEL_URL,
-  demoGarment,
-  filterGarments,
-  garments,
-} from './garments'
-import type { Garment, GarmentFilter } from './garments'
-
-const catalog: readonly Garment[] = [
-  { ...demoGarment, id: 'women-1', gender: 'women' },
-  { ...demoGarment, id: 'shared', gender: 'unisex' },
-  { ...demoGarment, id: 'men-1', gender: 'men' },
-  { ...demoGarment, id: 'women-2', gender: 'women' },
-]
-
-describe('garment catalog', () => {
-  it('exports the default GLB URL and gives catalog garments a model URL', () => {
-    expect(DEFAULT_GARMENT_MODEL_URL).toBe(
-      `${import.meta.env.BASE_URL}garments/tshirt1.glb`,
-    )
-
-    expect(demoGarment.modelUrl).toBe(DEFAULT_GARMENT_MODEL_URL)
-
-    for (const garment of garments) {
-      expect(garment.modelUrl).toBeTruthy()
-    }
-  })
-})
-
-describe('filterGarments', () => {
-  it.each<[GarmentFilter, string[]]>([
-    ['all', ['women-1', 'shared', 'men-1', 'women-2']],
-    ['men', ['shared', 'men-1']],
-    ['women', ['women-1', 'shared', 'women-2']],
-  ])(
-    'includes shared garments in %s and preserves catalog order',
-    (filter, expected) => {
-      expect(
-        filterGarments(catalog, filter).map((garment) => garment.id),
-      ).toEqual(expected)
-
-      expect(catalog.map((garment) => garment.id)).toEqual([
-        'women-1',
-        'shared',
-        'men-1',
-        'women-2',
-      ])
-    },
-  )
-
-  it('supports an empty catalog or a category with no matches', () => {
-    expect(filterGarments([], 'all')).toEqual([])
-    expect(filterGarments([], 'women')).toEqual([])
-    expect(filterGarments([catalog[0]], 'men')).toEqual([])
-  })
-})
-
-
-it('registers all five actual model/icon paths and the new categories', () => {
-  const expected = [
-    ['tshirt-1', 'tshirt', 'tshirt1'],
-    ['tshirt-2', 'tshirt', 'tshirt2'],
-    ['pants', 'bottoms', 'pants'],
-    ['skirt', 'bottoms', 'skirt'],
-    ['dress', 'onepiece', 'dress'],
-  ]
-  expect(garments).toHaveLength(expected.length)
-  expect(new Set(garments.map(item => item.id)).size).toBe(garments.length)
-  for (const [id, category, filename] of expected) {
-    const item = garments.find(garment => garment.id === id)
-    expect(item?.category).toBe(category)
-    expect(item?.modelUrl).toBe(`${import.meta.env.BASE_URL}garments/${filename}.glb`)
-    expect(item?.image).toBe(`${import.meta.env.BASE_URL}garments/${filename}_icon.png`)
-  }
-})
-</file>
-
 <file path="src/features/wardrobe/GarmentSelector.tsx">
 import { useId } from 'react'
 import { garmentGenderLabels } from './garments'
@@ -3378,6 +2913,866 @@ export function GarmentSelector({
       )}
     </div>
   )
+}
+</file>
+
+<file path="src/features/wardrobe/OutfitSelector.css">
+.outfit-selector { min-width: 0; margin: 22px 0; }
+.outfit-selector button { font: inherit; cursor: pointer; border: 1px solid #c8d2c2; background: #fff; color: #253d32; border-radius: 8px; padding: 8px; }
+.outfit-selector button:disabled { opacity: .45; cursor: default; }
+.outfit-selector button:focus-visible { outline: 3px solid #609446; outline-offset: 2px; }
+.outfit-selector .outfit-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.outfit-selector .outfit-tabs [aria-selected="true"] { color: #fff; background: #253d32; }
+.outfit-selector .outfit-tabs button { font-size: 12px; padding: 10px 4px; overflow-wrap: anywhere; }
+.outfit-selector .outfit-hint { font-size: 11px; line-height: 1.6; color: #65715f; margin: 10px 0; }
+.outfit-selector .outfit-filter { border: 0; margin: 12px 0; padding: 0; }
+.outfit-selector .outfit-filter legend { font-size: 12px; margin-bottom: 6px; }
+.outfit-selector .outfit-filter label { display: inline-flex; gap: 4px; align-items: center; margin-right: 12px; font-size: 12px; }
+.outfit-selector .outfit-preview { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+.outfit-selector .outfit-preview img { width: 90px; height: 100px; object-fit: contain; }
+.outfit-selector .outfit-preview p { margin: 4px 0; font-size: 11px; }
+.outfit-selector .outfit-preview span { font-size: 11px; }
+.outfit-selector .outfit-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.outfit-selector .outfit-actions button { flex: 1 1 auto; font-size: 12px; }
+.outfit-selector .outfit-thumbnails { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.outfit-selector .outfit-thumbnails button { padding: 6px; min-width: 0; }
+.outfit-selector .outfit-thumbnails img { width: 100%; height: 64px; object-fit: contain; }
+.outfit-selector .outfit-thumbnails span { display: block; font-size: 10px; overflow-wrap: anywhere; }
+.outfit-selector .outfit-thumbnails [aria-pressed="true"] { background: #edf4e4; border-color: #476641; }
+.outfit-selector .outfit-summary { border-top: 1px solid #dfe5d9; margin-top: 16px; padding-top: 12px; font-size: 12px; }
+.outfit-selector .outfit-worn-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.outfit-selector .outfit-worn-item button { font-size: 11px; padding: 4px 8px; }
+</file>
+
+<file path="src/features/wardrobe/OutfitSelector.tsx">
+import { useId } from 'react'
+import type { KeyboardEvent } from 'react'
+import {
+  garmentGenderLabels,
+  garmentSlotLabels,
+  getGarmentSlot,
+} from './garments'
+import type { Garment, GarmentFilter, GarmentSlot } from './garments'
+import type { OutfitAction, OutfitState } from './outfitState'
+import './OutfitSelector.css'
+
+const slots: GarmentSlot[] = ['tops', 'bottoms']
+
+const filters: { value: GarmentFilter; label: string }[] = [
+  { value: 'men', label: '男性' },
+  { value: 'women', label: '女性' },
+  { value: 'all', label: '全て' },
+]
+
+function itemTypeLabel(item: Garment): string {
+  if (item.category === 'onepiece') {
+    return 'ワンピース'
+  }
+
+  return getGarmentSlot(item.category) === 'bottoms'
+    ? 'ボトムス'
+    : 'トップス'
+}
+
+export function OutfitSelector({
+  state,
+  candidates,
+  worn,
+  onAction,
+}: {
+  state: OutfitState
+  candidates: readonly Garment[]
+  worn: readonly Garment[]
+  onAction: (action: OutfitAction) => void
+}) {
+  const id = useId()
+
+  const index = candidates.findIndex(
+    (item) => item.id === state.selected[state.focus],
+  )
+
+  const preview = candidates[index >= 0 ? index : 0]
+
+  const canCycle =
+    candidates.length > 1 ||
+    (candidates.length === 1 && index < 0)
+
+  function onTabKey(
+    event: KeyboardEvent<HTMLButtonElement>,
+    current: number,
+  ) {
+    let next: number
+
+    if (event.key === 'ArrowRight') {
+      next = (current + 1) % slots.length
+    } else if (event.key === 'ArrowLeft') {
+      next = (current + slots.length - 1) % slots.length
+    } else if (event.key === 'Home') {
+      next = 0
+    } else if (event.key === 'End') {
+      next = slots.length - 1
+    } else {
+      return
+    }
+
+    event.preventDefault()
+
+    onAction({
+      type: 'focus',
+      slot: slots[next],
+    })
+
+    document
+      .getElementById(`${id}-tab-${slots[next]}`)
+      ?.focus()
+  }
+
+  return (
+    <section
+      className="outfit-selector"
+      aria-label="服を選ぶ"
+    >
+      <div
+        className="outfit-tabs"
+        role="tablist"
+        aria-label="操作する服のカテゴリ"
+      >
+        {slots.map((slot, index) => (
+          <button
+            key={slot}
+            type="button"
+            role="tab"
+            id={`${id}-tab-${slot}`}
+            aria-selected={state.focus === slot}
+            aria-controls={`${id}-panel`}
+            tabIndex={state.focus === slot ? 0 : -1}
+            onKeyDown={(event) => onTabKey(event, index)}
+            onClick={() =>
+              onAction({
+                type: 'focus',
+                slot,
+              })
+            }
+          >
+            {garmentSlotLabels[slot]}
+          </button>
+        ))}
+      </div>
+
+      <div
+        id={`${id}-panel`}
+        role="tabpanel"
+        aria-labelledby={`${id}-tab-${state.focus}`}
+      >
+        <p className="outfit-hint">
+          {state.focus === 'tops'
+            ? 'スワイプは「トップス」を切り替えます。ワンピースもこの一覧に含まれます。'
+            : 'スワイプは「ボトムス」だけを切り替えます。'}
+        </p>
+
+        <fieldset className="outfit-filter">
+          <legend>商品の絞り込み</legend>
+
+          {filters.map((filter) => (
+            <label key={filter.value}>
+              <input
+                type="radio"
+                name={`${id}-filter`}
+                value={filter.value}
+                checked={state.filter === filter.value}
+                onChange={() =>
+                  onAction({
+                    type: 'filter',
+                    filter: filter.value,
+                  })
+                }
+              />
+
+              {filter.label}
+            </label>
+          ))}
+        </fieldset>
+
+        {preview ? (
+          <>
+            <div className="outfit-preview">
+              <img
+                src={preview.image}
+                alt={`${preview.name}のアイコン`}
+              />
+
+              <div>
+                <p className="outfit-count">
+                  {index >= 0
+                    ? `${index + 1} / ${candidates.length}`
+                    : `未選択 / ${candidates.length}`}
+                </p>
+
+                <strong>{preview.name}</strong>
+                <p>{garmentGenderLabels[preview.gender]}</p>
+                <span>{itemTypeLabel(preview)}</span>
+
+                {index < 0 && (
+                  <span>プレビュー（未着用）</span>
+                )}
+              </div>
+            </div>
+
+            <div className="outfit-actions">
+              <button
+                type="button"
+                disabled={!canCycle}
+                onClick={() =>
+                  onAction({
+                    type: 'cycle',
+                    direction: 'previous',
+                  })
+                }
+              >
+                前の服
+              </button>
+
+              <button
+                type="button"
+                disabled={!canCycle}
+                onClick={() =>
+                  onAction({
+                    type: 'cycle',
+                    direction: 'next',
+                  })
+                }
+              >
+                次の服
+              </button>
+
+              <button
+                type="button"
+                disabled={state.selected[state.focus] === null}
+                onClick={() =>
+                  onAction({
+                    type: 'clear',
+                    slot: state.focus,
+                  })
+                }
+              >
+                このカテゴリを外す
+              </button>
+            </div>
+
+            <div className="outfit-thumbnails">
+              {candidates.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={`${item.name}を選ぶ`}
+                  aria-pressed={
+                    item.id === state.selected[state.focus]
+                  }
+                  onClick={() =>
+                    onAction({
+                      type: 'select',
+                      id: item.id,
+                    })
+                  }
+                >
+                  <img
+                    src={item.image}
+                    alt=""
+                  />
+                  <span>{item.name}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p role="status">
+            このカテゴリの服はまだありません。
+          </p>
+        )}
+      </div>
+
+      <div
+        className="outfit-summary"
+        aria-label="着用中の組み合わせ"
+      >
+        <strong>着用中</strong>
+
+        {worn.length === 0 ? (
+          <p>服は未選択です</p>
+        ) : (
+          worn.map((item) => (
+            <div
+              key={item.id}
+              className="outfit-worn-item"
+            >
+              <span>{item.name}</span>
+
+              <button
+                type="button"
+                aria-label={`${item.name}を外す`}
+                onClick={() =>
+                  onAction({
+                    type: 'clear',
+                    slot: getGarmentSlot(item.category),
+                  })
+                }
+              >
+                外す
+              </button>
+            </div>
+          ))
+        )}
+
+        <p className="outfit-hint">
+          タブ・絞り込みの変更だけでは着用中の服は変わりません。
+          ワンピース着用中は選択済みのボトムスを記憶したまま一時的に非表示にします。通常のトップスへ戻すと自動的に再表示されます。ワンピース着用中にボトムスを選び直すとワンピースは外れます。
+        </p>
+      </div>
+    </section>
+  )
+}
+</file>
+
+<file path="src/features/wardrobe/outfitState.test.ts">
+import { expect, it } from 'vitest'
+import { demoGarment, getGarmentSlot } from './garments'
+import type { Garment } from './garments'
+import {
+  createOutfitState,
+  getFocusedGarments,
+  getWornGarments,
+  reduceOutfit,
+} from './outfitState'
+
+const catalog: readonly Garment[] = [
+  { ...demoGarment, id: 'top-a', category: 'tshirt', gender: 'unisex' },
+  { ...demoGarment, id: 'top-b', category: 'jacket', gender: 'men' },
+  { ...demoGarment, id: 'pants', category: 'bottoms', gender: 'unisex' },
+  { ...demoGarment, id: 'skirt', category: 'bottoms', gender: 'women' },
+  { ...demoGarment, id: 'dress', category: 'onepiece', gender: 'women' },
+]
+
+const reduce = (
+  state: ReturnType<typeof createOutfitState>,
+  action: Parameters<typeof reduceOutfit>[1],
+) => reduceOutfit(state, action, catalog)
+
+it('maps onepiece into the tops slot and exposes only two slots', () => {
+  expect(
+    ['tshirt', 'shirt', 'jacket', 'onepiece'].map((category) =>
+      getGarmentSlot(category as Garment['category']),
+    ),
+  ).toEqual(['tops', 'tops', 'tops', 'tops'])
+
+  expect(getGarmentSlot('bottoms')).toBe('bottoms')
+})
+
+it('starts with an ordinary top and no automatically equipped bottoms', () => {
+  const state = createOutfitState(catalog)
+
+  expect(state.selected).toEqual({
+    tops: 'top-a',
+    bottoms: null,
+  })
+
+  expect(createOutfitState([]).selected).toEqual({
+    tops: null,
+    bottoms: null,
+  })
+})
+
+it('shows T-shirts and onepiece together while tops are focused', () => {
+  const state = createOutfitState(catalog)
+
+  expect(
+    getFocusedGarments(state, catalog).map((item) => item.id),
+  ).toEqual(['top-a', 'top-b', 'dress'])
+})
+
+it('toggles focus without changing the selected outfit', () => {
+  const state = createOutfitState(catalog)
+  const bottomFocus = reduce(state, { type: 'toggle-focus' })
+  const topFocus = reduce(bottomFocus, { type: 'toggle-focus' })
+
+  expect(bottomFocus.focus).toBe('bottoms')
+  expect(bottomFocus.selected).toEqual(state.selected)
+  expect(topFocus.focus).toBe('tops')
+  expect(topFocus.selected).toEqual(state.selected)
+})
+
+it('focus and gender filter do not change what is worn', () => {
+  const state = createOutfitState(catalog)
+  const focused = reduce(state, {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+  const filtered = reduce(focused, {
+    type: 'filter',
+    filter: 'men',
+  })
+
+  expect(filtered.selected).toEqual(state.selected)
+  expect(
+    getFocusedGarments(filtered, catalog).map((item) => item.id),
+  ).toEqual(['pants'])
+})
+
+it('equips ordinary tops and bottoms independently', () => {
+  let state = createOutfitState(catalog)
+
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'pants',
+  })
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'tops',
+  })
+  state = reduce(state, {
+    type: 'cycle',
+    direction: 'next',
+  })
+
+  expect(
+    getWornGarments(state, catalog).map((item) => item.id),
+  ).toEqual(['top-b', 'pants'])
+})
+
+it('keeps remembered bottoms while a onepiece is active and restores them when returning to a top', () => {
+  let state = createOutfitState(catalog)
+
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'pants',
+  })
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'tops',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'top-b',
+  })
+
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'top-b',
+    'pants',
+  ])
+
+  state = reduce(state, {
+    type: 'cycle',
+    direction: 'next',
+  })
+
+  expect(state.selected).toEqual({
+    tops: 'dress',
+    bottoms: 'pants',
+  })
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'dress',
+  ])
+
+  state = reduce(state, {
+    type: 'cycle',
+    direction: 'next',
+  })
+
+  expect(state.selected).toEqual({
+    tops: 'top-a',
+    bottoms: 'pants',
+  })
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'top-a',
+    'pants',
+  ])
+})
+
+it('suppresses a remembered bottom from the worn list while a onepiece is selected', () => {
+  const state = {
+    ...createOutfitState(catalog),
+    selected: {
+      tops: 'dress',
+      bottoms: 'skirt',
+    },
+  }
+
+  expect(state.selected.bottoms).toBe('skirt')
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'dress',
+  ])
+})
+
+it('clearing a onepiece reveals the remembered bottom', () => {
+  // Build the state only through the reducer so `state` keeps the full
+  // OutfitState type (`string | null` for each slot) instead of being narrowed
+  // to `{ tops: string; bottoms: string }` by an object literal.
+  let state = createOutfitState(catalog)
+
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'pants',
+  })
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'tops',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'dress',
+  })
+
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'dress',
+  ])
+
+  state = reduce(state, {
+    type: 'clear',
+    slot: 'tops',
+  })
+
+  expect(state.selected).toEqual({
+    tops: null,
+    bottoms: 'pants',
+  })
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'pants',
+  ])
+})
+
+it('selecting bottoms while a onepiece is worn removes the onepiece and equips the chosen bottom', () => {
+  let state = createOutfitState(catalog)
+
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'pants',
+  })
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'tops',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'dress',
+  })
+
+  expect(state.selected).toEqual({
+    tops: 'dress',
+    bottoms: 'pants',
+  })
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'dress',
+  ])
+
+  state = reduce(state, {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+  state = reduce(state, {
+    type: 'select',
+    id: 'skirt',
+  })
+
+  expect(state.selected).toEqual({
+    tops: null,
+    bottoms: 'skirt',
+  })
+  expect(getWornGarments(state, catalog).map((item) => item.id)).toEqual([
+    'skirt',
+  ])
+})
+
+it('cycles from an unselected bottoms slot in either direction and wraps', () => {
+  let state = reduce(createOutfitState(catalog), {
+    type: 'focus',
+    slot: 'bottoms',
+  })
+
+  state = reduce(state, {
+    type: 'cycle',
+    direction: 'previous',
+  })
+  expect(state.selected.bottoms).toBe('skirt')
+
+  state = reduce(state, {
+    type: 'cycle',
+    direction: 'next',
+  })
+  expect(state.selected.bottoms).toBe('pants')
+})
+
+it('ignores selections outside the active slot/filter and handles no candidates', () => {
+  const initial = createOutfitState(catalog)
+
+  expect(
+    reduce(initial, {
+      type: 'select',
+      id: 'pants',
+    }),
+  ).toBe(initial)
+
+  const state = reduce(initial, {
+    type: 'filter',
+    filter: 'men',
+  })
+
+  expect(
+    reduce(state, {
+      type: 'select',
+      id: 'dress',
+    }),
+  ).toBe(state)
+
+  const emptyCatalog: readonly Garment[] = []
+  const empty = createOutfitState(emptyCatalog)
+  expect(
+    reduceOutfit(
+      empty,
+      { type: 'cycle', direction: 'next' },
+      emptyCatalog,
+    ),
+  ).toBe(empty)
+})
+
+it('does not mutate previous selection objects', () => {
+  const initial = createOutfitState(catalog)
+  Object.freeze(initial.selected)
+  Object.freeze(initial)
+
+  const changed = reduce(initial, {
+    type: 'select',
+    id: 'top-b',
+  })
+
+  expect(initial.selected.tops).toBe('top-a')
+  expect(changed.selected.tops).toBe('top-b')
+})
+
+it('clears one slot without altering the other slot', () => {
+  const state = {
+    ...createOutfitState(catalog),
+    selected: {
+      tops: 'top-a',
+      bottoms: 'pants',
+    },
+  }
+
+  const changed = reduce(state, {
+    type: 'clear',
+    slot: 'tops',
+  })
+
+  expect(changed.selected).toEqual({
+    tops: null,
+    bottoms: 'pants',
+  })
+})
+</file>
+
+<file path="src/features/wardrobe/outfitState.ts">
+import { filterGarments, getGarmentSlot } from './garments'
+import type { Garment, GarmentFilter, GarmentSlot } from './garments'
+
+export interface OutfitState {
+  focus: GarmentSlot
+  filter: GarmentFilter
+  selected: Record<GarmentSlot, string | null>
+}
+
+export type OutfitAction =
+  | { type: 'focus'; slot: GarmentSlot }
+  | { type: 'toggle-focus' }
+  | { type: 'filter'; filter: GarmentFilter }
+  | { type: 'select'; id: string }
+  | { type: 'cycle'; direction: 'next' | 'previous' }
+  | { type: 'clear'; slot: GarmentSlot }
+
+function garmentById(
+  catalog: readonly Garment[],
+  id: string | null,
+): Garment | undefined {
+  return id == null
+    ? undefined
+    : catalog.find((item) => item.id === id)
+}
+
+function isOnepieceId(
+  catalog: readonly Garment[],
+  id: string | null,
+): boolean {
+  return garmentById(catalog, id)?.category === 'onepiece'
+}
+
+export function createOutfitState(catalog: readonly Garment[]): OutfitState {
+  const defaultTop =
+    catalog.find(
+      (item) =>
+        getGarmentSlot(item.category) === 'tops' &&
+        item.category !== 'onepiece',
+    ) ??
+    catalog.find((item) => getGarmentSlot(item.category) === 'tops')
+
+  return {
+    focus: 'tops',
+    filter: 'all',
+    selected: {
+      tops: defaultTop?.id ?? null,
+      bottoms: null,
+    },
+  }
+}
+
+export function getFocusedGarments(
+  state: OutfitState,
+  catalog: readonly Garment[],
+): readonly Garment[] {
+  return filterGarments(catalog, state.filter).filter(
+    (item) => getGarmentSlot(item.category) === state.focus,
+  )
+}
+
+export function getWornGarments(
+  state: OutfitState,
+  catalog: readonly Garment[],
+): readonly Garment[] {
+  const top = garmentById(catalog, state.selected.tops)
+
+  // A onepiece occupies the tops slot but is full-body. Keep any selected
+  // bottom in state as wardrobe memory, while suppressing it from rendering.
+  if (top?.category === 'onepiece') {
+    return [top]
+  }
+
+  const bottom = garmentById(catalog, state.selected.bottoms)
+  const worn: Garment[] = []
+
+  if (top && getGarmentSlot(top.category) === 'tops') {
+    worn.push(top)
+  }
+
+  if (bottom && getGarmentSlot(bottom.category) === 'bottoms') {
+    worn.push(bottom)
+  }
+
+  return worn
+}
+
+/** Pure, atomic transitions. Changing a browsing tab/filter does not undress. */
+export function reduceOutfit(
+  state: OutfitState,
+  action: OutfitAction,
+  catalog: readonly Garment[],
+): OutfitState {
+  if (action.type === 'focus') {
+    return action.slot === state.focus
+      ? state
+      : { ...state, focus: action.slot }
+  }
+
+  if (action.type === 'toggle-focus') {
+    return {
+      ...state,
+      focus: state.focus === 'tops' ? 'bottoms' : 'tops',
+    }
+  }
+
+  if (action.type === 'filter') {
+    return action.filter === state.filter
+      ? state
+      : { ...state, filter: action.filter }
+  }
+
+  if (action.type === 'clear') {
+    return state.selected[action.slot] === null
+      ? state
+      : {
+          ...state,
+          selected: {
+            ...state.selected,
+            [action.slot]: null,
+          },
+        }
+  }
+
+  const candidates = getFocusedGarments(state, catalog)
+  let item: Garment | undefined
+
+  if (action.type === 'select') {
+    item = candidates.find((candidate) => candidate.id === action.id)
+  } else {
+    if (candidates.length === 0) {
+      return state
+    }
+
+    const current = candidates.findIndex(
+      (candidate) => candidate.id === state.selected[state.focus],
+    )
+
+    const index =
+      current < 0
+        ? action.direction === 'next'
+          ? 0
+          : candidates.length - 1
+        : (
+            current +
+            (action.direction === 'next' ? 1 : -1) +
+            candidates.length
+          ) % candidates.length
+
+    item = candidates[index]
+  }
+
+  if (!item) {
+    return state
+  }
+
+  const slot = getGarmentSlot(item.category)
+  const selected: OutfitState['selected'] =
+    slot === 'tops'
+      ? {
+          // Tops and onepieces share the same UI slot. When a onepiece is
+          // selected, keep the current bottoms ID as hidden wardrobe memory.
+          // getWornGarments() is responsible for suppressing that bottom while
+          // the onepiece is active, so returning to an ordinary top restores it.
+          ...state.selected,
+          tops: item.id,
+        }
+      : {
+          // Selecting/changing bottoms while a onepiece is actively worn keeps
+          // the previous UX: remove the onepiece rather than rendering both.
+          // The newly chosen bottom becomes the remembered/active bottom.
+          tops: isOnepieceId(catalog, state.selected.tops)
+            ? null
+            : state.selected.tops,
+          bottoms: item.id,
+        }
+
+  if (
+    selected.tops === state.selected.tops &&
+    selected.bottoms === state.selected.bottoms
+  ) {
+    return state
+  }
+
+  return {
+    ...state,
+    selected,
+  }
 }
 </file>
 
@@ -4131,6 +4526,102 @@ export default defineConfig({
 </html>
 </file>
 
+<file path="src/features/gesture/SwipeGesture.tsx">
+import { useEffect, useState } from 'react'
+import type { PoseSource } from '../pose/poseTypes'
+import {
+  createSwipeDetector,
+  type SwipeDirection,
+} from './swipeDetector'
+import { createFocusToggleDetector } from './focusToggleDetector'
+
+export function SwipeGesture({
+  source,
+  mirrored,
+  resetKey,
+  canSwipe,
+  onSwipe,
+  onToggleFocus,
+}: {
+  source: PoseSource
+  mirrored: boolean
+  resetKey: number
+  canSwipe: boolean
+  onSwipe: (direction: SwipeDirection) => void
+  onToggleFocus: () => void
+}) {
+  const [message, setMessage] = useState(
+    '片手を横へスワイプで服変更 · 両手を肩より上でキープするとトップス／ボトムス切替',
+  )
+
+  useEffect(() => {
+    const swipeDetector = createSwipeDetector(mirrored)
+    const focusDetector = createFocusToggleDetector()
+
+    let lastMessage = ''
+    let lastDirection: SwipeDirection | undefined
+    let justToggledFocus = false
+
+    return source.subscribe((frame) => {
+      const focus = focusDetector.push(frame)
+
+      if (focus.toggle) {
+        justToggledFocus = true
+        onToggleFocus()
+      }
+
+      const swipe =
+        canSwipe && !focus.blockSwipe
+          ? swipeDetector.push(frame)
+          : swipeDetector.push(null)
+
+      if (swipe.direction) {
+        lastDirection = swipe.direction
+        onSwipe(swipe.direction)
+      }
+
+      let next: string
+
+      if (focus.state === 'holding') {
+        const percent = Math.round(focus.progress * 100)
+        next = `両手を上げたままキープ… ${percent}% · トップス／ボトムス切替`
+      } else if (focus.state === 'wait-release') {
+        next = justToggledFocus
+          ? '操作対象を切り替えました · 両手を肩より下げると次の操作ができます'
+          : '両手を肩より下げるとジェスチャーを準備できます'
+      } else if (!canSwipe) {
+        justToggledFocus = false
+        next = '両手を肩より上で約0.7秒キープ · トップス／ボトムス切替'
+      } else {
+        justToggledFocus = false
+
+        next =
+          swipe.state === 'searching'
+            ? '両肩を画面に映してください'
+            : swipe.state === 'hand-missing'
+              ? '手首をカメラに見せてください'
+              : swipe.state === 'cooldown'
+                ? `${lastDirection === 'next' ? '← 次の服へ' : '前の服へ →'} · 手を少し止めると次の操作ができます`
+                : swipe.state === 'ready'
+                  ? '片手を横へスワイプで服変更 · 両手上げでトップス／ボトムス切替'
+                  : '片手を胸の高さに上げてください · 両手上げでスロット切替'
+      }
+
+      if (next !== lastMessage) {
+        lastMessage = next
+        setMessage(next)
+      }
+    })
+  }, [source, mirrored, resetKey, canSwipe, onSwipe, onToggleFocus])
+
+  return (
+    <p className="gesture-status" role="status">
+      {message}
+    </p>
+  )
+}
+</file>
+
 <file path="src/features/pose/poseGeometry.ts">
 import type { PosePoint, PosePoint2D } from './poseTypes'
 
@@ -4583,6 +5074,294 @@ export interface PoseSource {
 }
 </file>
 
+<file path="src/features/virtualTryOn/GarmentOverlay.switching.test.tsx">
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
+import * as THREE from 'three'
+import { clone } from 'three/addons/utils/SkeletonUtils.js'
+import { GarmentOverlay } from './GarmentOverlay'
+import { CameraView } from '../camera/CameraView'
+import { startPoseSession } from '../pose/poseSession'
+import { createPoseChannel } from '../pose/poseChannel'
+import { DEFAULT_GARMENT_MODEL_URL, demoGarment, garments, getGarmentSlot } from '../wardrobe/garments'
+import type { Garment } from '../wardrobe/garments'
+import { makeSwipeFrame } from '../../test/swipeFixture'
+
+const harness = vi.hoisted(() => ({
+  load: vi.fn(),
+  clear: vi.fn(),
+  canvasMount: vi.fn(),
+  canvasUnmount: vi.fn(),
+}))
+
+// Test the actual selection/loading/lifecycle logic without a WebGL renderer.
+vi.mock('@react-three/fiber', async () => {
+  const { createElement, Fragment, useEffect } = await import('react')
+  return {
+    Canvas: function CanvasDouble({ children }: { children: ReactNode }) {
+      useEffect(() => {
+        harness.canvasMount()
+        return () => { harness.canvasUnmount() }
+      }, [])
+      return createElement(Fragment, null, children)
+    },
+    useFrame: vi.fn(),
+  }
+})
+vi.mock('@react-three/drei', () => ({
+  useGLTF: Object.assign(harness.load, { clear: harness.clear }),
+}))
+vi.mock('three/addons/utils/SkeletonUtils.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('three/addons/utils/SkeletonUtils.js')>()
+  return { ...original, clone: vi.fn(original.clone) }
+})
+vi.mock('../pose/poseSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../pose/poseSession')>()),
+  startPoseSession: vi.fn(() => vi.fn()),
+}))
+vi.mock('../wardrobe/garments', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../wardrobe/garments')>()
+
+  return {
+    ...original,
+    // Keep named exports explicit so GarmentOverlay can import the default GLB
+    // constant from this mocked module without Vitest reporting a missing export.
+    DEFAULT_GARMENT_MODEL_URL: original.DEFAULT_GARMENT_MODEL_URL,
+    demoGarment: original.demoGarment,
+    filterGarments: original.filterGarments,
+    garmentGenderLabels: original.garmentGenderLabels,
+
+    // Distinct, mocked GLB assets; no claim that these files exist on disk.
+    garments: original.garments.map((garment) => ({
+      ...garment,
+      modelUrl: `/switch-fixture/${garment.id}.glb`,
+    })),
+  }
+})
+
+type Resource =
+  | { kind: 'ready'; scene: THREE.Group }
+  | { kind: 'pending'; promise: Promise<void> }
+  | { kind: 'error'; error: Error }
+
+const resources = new Map<string, Resource>()
+const fixtures: THREE.Mesh[] = []
+let now = 1000
+
+function ready(url: string) {
+  const scene = new THREE.Group()
+  scene.name = url
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 1.7, 0.2),
+    new THREE.MeshStandardMaterial(),
+  )
+  mesh.name = 'SwitchFixtureCloth'
+  fixtures.push(mesh)
+  const left = new THREE.Object3D()
+  const right = new THREE.Object3D()
+  left.name = 'AR_LeftShoulder'
+  right.name = 'AR_RightShoulder'
+  left.position.set(0.5, 0.7, 0)
+  right.position.set(-0.5, 0.7, 0)
+  scene.add(mesh, left, right)
+  resources.set(url, { kind: 'ready', scene })
+  return scene
+}
+
+function pending(url: string) {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  resources.set(url, { kind: 'pending', promise })
+  return () => {
+    ready(url)
+    resolve()
+  }
+}
+
+function garment(id: string, modelUrl: string): Garment {
+  return { ...demoGarment, id, name: `Fixture ${id}`, modelUrl }
+}
+
+function latestAsset(): THREE.Object3D {
+  const result = vi.mocked(clone).mock.results.at(-1)
+  if (!result || result.type !== 'return') throw new Error('No cloned GLB')
+  return result.value
+}
+
+function localMaterial(asset: THREE.Object3D): THREE.Material {
+  const mesh = asset.getObjectByName('SwitchFixtureCloth')
+  if (!(mesh instanceof THREE.Mesh) || Array.isArray(mesh.material)) {
+    throw new Error('Missing fixture material')
+  }
+  return mesh.material
+}
+
+beforeEach(() => {
+  now = 1000
+  vi.useFakeTimers()
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  harness.load.mockReset().mockImplementation((url: string) => {
+    const resource = resources.get(url)
+    if (!resource) throw new Error(`Missing fixture: ${url}`)
+    if (resource.kind === 'pending') throw resource.promise
+    if (resource.kind === 'error') throw resource.error
+    return { scene: resource.scene }
+  })
+  harness.clear.mockReset()
+  harness.canvasMount.mockClear()
+  harness.canvasUnmount.mockClear()
+  vi.mocked(clone).mockClear()
+  vi.mocked(startPoseSession).mockClear()
+  ready(DEFAULT_GARMENT_MODEL_URL)
+})
+
+afterEach(() => {
+  cleanup()
+  for (const mesh of fixtures) {
+    mesh.geometry.dispose()
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    materials.forEach((material) => material.dispose())
+  }
+  fixtures.length = 0
+  resources.clear()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
+
+it('loads the selected URL, disposes the old instance, and preserves Canvas and the pose subscription', () => {
+  const a = garment('a', '/switch-fixture/a.glb')
+  const b = garment('b', '/switch-fixture/b.glb')
+  const cachedA = ready(a.modelUrl!)
+  ready(b.modelUrl!)
+  const cachedMaterial = localMaterial(cachedA)
+  const sharedDispose = vi.spyOn(cachedMaterial, 'dispose')
+  const source = createPoseChannel()
+  const subscribe = vi.spyOn(source, 'subscribe')
+  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
+  const oldAsset = latestAsset()
+  const dispose = vi.spyOn(localMaterial(oldAsset), 'dispose')
+
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+
+  expect(harness.load).toHaveBeenLastCalledWith(b.modelUrl)
+  expect(latestAsset().name).toBe(b.modelUrl)
+  expect(latestAsset()).not.toBe(oldAsset)
+  expect(dispose).toHaveBeenCalledOnce()
+  expect(sharedDispose).not.toHaveBeenCalled()
+  expect(cachedA.parent).toBeNull()
+  expect(subscribe).toHaveBeenCalledOnce()
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+  expect(harness.canvasUnmount).not.toHaveBeenCalled()
+  expect(harness.clear).not.toHaveBeenCalled()
+})
+
+it('reloads the selected instance when its URL changes without changing garment id', () => {
+  const a = garment('same-id', '/switch-fixture/a.glb')
+  const b = garment('same-id', '/switch-fixture/b.glb')
+  ready(a.modelUrl!)
+  ready(b.modelUrl!)
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
+  const first = latestAsset()
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+  expect(latestAsset()).not.toBe(first)
+  expect(latestAsset().name).toBe(b.modelUrl)
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+
+it('does not resurrect a slow previous selection after a newer GLB has loaded', async () => {
+  const a = garment('a', '/switch-fixture/a.glb')
+  const b = garment('b', '/switch-fixture/b.glb')
+  const c = garment('c', '/switch-fixture/c.glb')
+  ready(a.modelUrl!)
+  const finishB = pending(b.modelUrl!)
+  ready(c.modelUrl!)
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+  expect(screen.getByText('3Dモデルを読み込んでいます…')).toBeInTheDocument()
+  view.rerender(<GarmentOverlay source={source} garment={c} mirrored />)
+  const latest = latestAsset()
+  await act(async () => { finishB() })
+  expect(latestAsset()).toBe(latest)
+  expect(latest.name).toBe(c.modelUrl)
+  expect(screen.queryByText('3Dモデルを読み込んでいます…')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-url', c.modelUrl)
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+
+it('can select another GLB after a load error without recreating Canvas', () => {
+  const initial = garment('initial', '/switch-fixture/initial.glb')
+  ready(initial.modelUrl!)
+  const a = garment('broken', '/switch-fixture/broken.glb')
+  const b = garment('good', '/switch-fixture/good.glb')
+  resources.set(a.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
+  ready(b.modelUrl!)
+  const source = createPoseChannel()
+  const view = render(<GarmentOverlay source={source} garment={initial} mirrored />)
+  view.rerender(<GarmentOverlay source={source} garment={a} mirrored />)
+  expect(screen.getByRole('button', { name: '3Dモデルを再読み込み' })).toBeInTheDocument()
+  view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
+  expect(latestAsset().name).toBe(b.modelUrl)
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+
+it('retries only the selected failed URL, not the default or other cached GLBs', () => {
+  const selected = garment('broken', '/switch-fixture/broken.glb')
+  resources.set(selected.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
+  harness.clear.mockImplementation((url: string) => { ready(url) })
+  const source = createPoseChannel()
+  render(<GarmentOverlay source={source} garment={selected} mirrored />)
+  fireEvent.click(screen.getByRole('button', { name: '3Dモデルを再読み込み' }))
+  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(selected.modelUrl)
+  expect(latestAsset().name).toBe(selected.modelUrl)
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+})
+
+it('keeps legacy 2D fixtures usable without a modelUrl property', () => {
+  const legacy = { ...demoGarment, modelUrl: undefined }
+  render(<GarmentOverlay source={createPoseChannel()} garment={legacy} mirrored />)
+  expect(harness.load).toHaveBeenLastCalledWith(DEFAULT_GARMENT_MODEL_URL)
+})
+
+it('routes a real wrist swipe through CameraView to another GLB without restarting inference', async () => {
+  for (const item of garments) ready(item.modelUrl!)
+  const stop = vi.fn()
+  const track = { stop, onended: null as (() => void) | null }
+  const stream = {
+    getTracks: () => [track],
+    getVideoTracks: () => [track],
+  } as unknown as MediaStream
+  const getUserMedia = vi.fn().mockResolvedValue(stream)
+  vi.stubGlobal('isSecureContext', true)
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  render(<CameraView />)
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+  })
+  expect(startPoseSession).toHaveBeenCalledOnce()
+  const call = vi.mocked(startPoseSession).mock.calls[0]
+  if (!call) throw new Error('Pose session did not start')
+  const publish = call[1].onFrame
+  act(() => {
+    for (const x of [-0.5, -0.2, 0.1, 0.4]) {
+      now += 80
+      publish(makeSwipeFrame(now, x))
+    }
+  })
+  expect(screen.getByText(`2 / ${garments.filter(item => getGarmentSlot(item.category) === 'tops').length}`)).toBeInTheDocument()
+  expect(harness.load).toHaveBeenLastCalledWith(garments[1].modelUrl)
+  expect(latestAsset().name).toBe(garments[1].modelUrl)
+  expect(startPoseSession).toHaveBeenCalledOnce()
+  expect(getUserMedia).toHaveBeenCalledOnce()
+  expect(harness.canvasMount).toHaveBeenCalledOnce()
+})
+</file>
+
 <file path="src/features/virtualTryOn/GarmentOverlay.test.tsx">
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -4841,6 +5620,99 @@ it('lerps scale using alpha rather than snapping on every observation', () => {
   emit(source, shoulders(1280, 720, 0.5))
   expect(root().scale.x).toBeGreaterThan(first)
   expect(root().scale.x).toBeLessThan(2 * initial)
+})
+</file>
+
+<file path="src/features/wardrobe/garments.test.ts">
+import { describe, expect, it } from 'vitest'
+import {
+  DEFAULT_GARMENT_MODEL_URL,
+  demoGarment,
+  filterGarments,
+  garments,
+  garmentSlotLabels,
+  getGarmentSlot,
+} from './garments'
+import type { Garment, GarmentFilter } from './garments'
+
+const catalog: readonly Garment[] = [
+  { ...demoGarment, id: 'women-1', gender: 'women' },
+  { ...demoGarment, id: 'shared', gender: 'unisex' },
+  { ...demoGarment, id: 'men-1', gender: 'men' },
+  { ...demoGarment, id: 'women-2', gender: 'women' },
+]
+
+describe('garment catalog', () => {
+  it('exports the default GLB URL and gives catalog garments a model URL', () => {
+    expect(DEFAULT_GARMENT_MODEL_URL).toBe(
+      `${import.meta.env.BASE_URL}garments/tshirt1.glb`,
+    )
+
+    expect(demoGarment.modelUrl).toBe(DEFAULT_GARMENT_MODEL_URL)
+
+    for (const garment of garments) {
+      expect(garment.modelUrl).toBeTruthy()
+    }
+  })
+})
+
+describe('filterGarments', () => {
+  it.each<[GarmentFilter, string[]]>([
+    ['all', ['women-1', 'shared', 'men-1', 'women-2']],
+    ['men', ['shared', 'men-1']],
+    ['women', ['women-1', 'shared', 'women-2']],
+  ])(
+    'includes shared garments in %s and preserves catalog order',
+    (filter, expected) => {
+      expect(
+        filterGarments(catalog, filter).map((garment) => garment.id),
+      ).toEqual(expected)
+
+      expect(catalog.map((garment) => garment.id)).toEqual([
+        'women-1',
+        'shared',
+        'men-1',
+        'women-2',
+      ])
+    },
+  )
+
+  it('supports an empty catalog or a category with no matches', () => {
+    expect(filterGarments([], 'all')).toEqual([])
+    expect(filterGarments([], 'women')).toEqual([])
+    expect(filterGarments([catalog[0]], 'men')).toEqual([])
+  })
+})
+
+
+it('registers all five actual model/icon paths and the new categories', () => {
+  const expected = [
+    ['tshirt-1', 'tshirt', 'tshirt1'],
+    ['tshirt-2', 'tshirt', 'tshirt2'],
+    ['pants', 'bottoms', 'pants'],
+    ['skirt', 'bottoms', 'skirt'],
+    ['dress', 'onepiece', 'dress'],
+  ]
+  expect(garments).toHaveLength(expected.length)
+  expect(new Set(garments.map(item => item.id)).size).toBe(garments.length)
+  for (const [id, category, filename] of expected) {
+    const item = garments.find(garment => garment.id === id)
+    expect(item?.category).toBe(category)
+    expect(item?.modelUrl).toBe(`${import.meta.env.BASE_URL}garments/${filename}.glb`)
+    expect(item?.image).toBe(`${import.meta.env.BASE_URL}garments/${filename}_icon.png`)
+  }
+})
+
+it('exposes only tops and bottoms slots and groups onepiece with tops', () => {
+  expect(garmentSlotLabels).toEqual({
+    tops: 'トップス',
+    bottoms: 'ボトムス',
+  })
+  expect(getGarmentSlot('tshirt')).toBe('tops')
+  expect(getGarmentSlot('shirt')).toBe('tops')
+  expect(getGarmentSlot('jacket')).toBe('tops')
+  expect(getGarmentSlot('onepiece')).toBe('tops')
+  expect(getGarmentSlot('bottoms')).toBe('bottoms')
 })
 </file>
 
@@ -5324,6 +6196,7 @@ interface Profile {
   fitTorso: boolean
   visualScale: [number, number, number]
   visualOffset: [number, number, number]
+  renderOrder: number
   segments: SegmentSpec[]
 }
 
@@ -5381,7 +6254,13 @@ function resolveProfile(
       (fitting?.scale ?? 1) * (fitting?.scaleY ?? 1),
       (fitting?.scale ?? 1) * (fitting?.scaleZ ?? 1),
     ],
-    visualOffset: [fitting?.offsetX ?? 0, fitting?.offsetY ?? 0, fitting?.offsetZ ?? 0],
+    visualOffset: [
+      fitting?.offsetX ?? 0,
+      fitting?.offsetY ?? 0,
+      (fitting?.offsetZ ?? 0) +
+        (fitting?.layerOffsetZ ?? (bottom ? -0.035 : 0)),
+    ],
+    renderOrder: fitting?.renderOrder ?? (bottom ? 10 : 20),
     segments,
   }
 }
@@ -5580,7 +6459,8 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
       profile.span <= 0 || profile.span > 1 || profile.height < 0 || profile.height > 1 ||
       profile.depth < 0 || profile.depth > 1 ||
       !profile.visualScale.every(value => Number.isFinite(value) && value > 0) ||
-      !profile.visualOffset.every(Number.isFinite)) throw new Error('Invalid fit3D calibration')
+      !profile.visualOffset.every(Number.isFinite) ||
+      !Number.isFinite(profile.renderOrder)) throw new Error('Invalid fit3D calibration')
   const asset = clone(scene)
   const oriented = new THREE.Group()
   oriented.rotation.set(...profile.rotation)
@@ -5663,12 +6543,16 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
     if (object instanceof THREE.Mesh) {
       object.material = Array.isArray(object.material) ? object.material.map(ownMaterial) : ownMaterial(object.material)
       object.castShadow = true; object.receiveShadow = false
+      object.renderOrder = profile.renderOrder
       shadowCasters.push(object)
     }
     if (object instanceof THREE.SkinnedMesh) skeletons.add(object.skeleton)
   })
   const root = new THREE.Group()
-  root.name = 'AR_GarmentRoot'; root.visible = false; root.add(visual)
+  root.name = 'AR_GarmentRoot'
+  root.visible = false
+  root.renderOrder = profile.renderOrder
+  root.add(visual)
   return { root, materials, skeletons, shadowCasters, corners, hipCenter,
     alpha: 0, placed: false, stretch: 1 }
 }
@@ -6001,7 +6885,9 @@ type OverlayProps = {
 export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayProps) {
   const worn = useMemo(() => {
     const list = garments ?? (garment ? [garment] : [])
-    const dress = list.find(item => getGarmentSlot(item.category) === 'onepiece')
+    // onepiece belongs to the tops UI slot, but remains full-body/exclusive.
+    // Check the anatomical category directly rather than the UI slot.
+    const dress = list.find(item => item.category === 'onepiece')
     if (dress) return [dress]
     return (['tops', 'bottoms'] as const).flatMap(slot => {
       const item = list.find(candidate => getGarmentSlot(candidate.category) === slot)
@@ -6165,13 +7051,21 @@ interface Props {
   showSkeleton: boolean
   showGarment: boolean
   garments: readonly Garment[]
-  swipeEnabled: boolean
+
+  /** Master switch for hand-based controls. */
+  gestureEnabled: boolean
+
+  /** Horizontal swipe is only useful when the focused slot can cycle. */
+  canSwipe: boolean
+
   gestureResetKey: number
   onSwipe: (direction: SwipeDirection) => void
+  onToggleFocus: () => void
 }
 
 export function VirtualMirror(props: Props) {
   const [attempt, setAttempt] = useState(0)
+
   return (
     <MirrorSession
       key={attempt}
@@ -6187,33 +7081,56 @@ function MirrorSession({
   showSkeleton,
   showGarment,
   garments,
-  swipeEnabled,
+  gestureEnabled,
+  canSwipe,
   gestureResetKey,
   onSwipe,
+  onToggleFocus,
   retry,
 }: Props & { retry: () => void }) {
   const [source] = useState(createPoseChannel)
   const [state, setState] = useState<PoseState>('loading')
+
   useEffect(() => {
-    if (!videoRef.current) return
+    if (!videoRef.current) {
+      return
+    }
+
     return startPoseSession(
       videoRef.current,
-      { onFrame: source.publish, onState: setState },
+      {
+        onFrame: source.publish,
+        onState: setState,
+      },
       async () => {
         const { createPoseLandmarker } = await import('../pose/poseLandmarker')
         return createPoseLandmarker()
       },
     )
-  }, [videoRef, source]) // Selections never restart inference.
+  }, [videoRef, source]) // Selections/focus changes never restart inference.
+
   return (
     <>
       {showGarment && (
-        <GarmentOverlay source={source} garments={garments} mirrored={mirrored} />
+        <GarmentOverlay
+          source={source}
+          garments={garments}
+          mirrored={mirrored}
+        />
       )}
+
       {showSkeleton && <PoseOverlay source={source} />}
-      <PoseDiagnostics source={source} mirrored={mirrored} />
+
+      <PoseDiagnostics
+        source={source}
+        mirrored={mirrored}
+      />
+
       <div className={`pose-hud ${mirrored ? 'is-mirrored' : ''}`}>
-        <p role="status" className={`pose-message pose-${state}`}>
+        <p
+          role="status"
+          className={`pose-message pose-${state}`}
+        >
           {state === 'loading'
             ? '姿勢推定を準備しています…'
             : state === 'error'
@@ -6224,16 +7141,23 @@ function MirrorSession({
                   ? '身体の一部を検出中'
                   : '身体を追跡中'}
         </p>
-        {showGarment && swipeEnabled && (
+
+        {showGarment && gestureEnabled && (
           <SwipeGesture
             source={source}
             mirrored={mirrored}
             resetKey={gestureResetKey}
+            canSwipe={canSwipe}
             onSwipe={onSwipe}
+            onToggleFocus={onToggleFocus}
           />
         )}
+
         {state === 'error' && (
-          <button className="pose-retry" onClick={retry}>
+          <button
+            className="pose-retry"
+            onClick={retry}
+          >
             姿勢推定を再試行
           </button>
         )}
@@ -6241,199 +7165,6 @@ function MirrorSession({
     </>
   )
 }
-</file>
-
-<file path="src/features/wardrobe/garments.ts">
-/** Legacy PNG coordinates; independent of GLB anchors. */
-export interface Point {
-  x: number
-  y: number
-}
-
-export type GarmentGender = 'men' | 'women' | 'unisex'
-export type GarmentFilter = 'all' | Exclude<GarmentGender, 'unisex'>
-export type GarmentCategory =
-  | 'tshirt'
-  | 'shirt'
-  | 'jacket'
-  | 'bottoms'
-  | 'onepiece'
-export type GarmentSlot = 'tops' | 'bottoms' | 'onepiece'
-
-export const garmentSlotLabels: Record<GarmentSlot, string> = {
-  tops: 'トップス',
-  bottoms: 'ボトムス',
-  onepiece: 'ワンピース',
-}
-
-export function getGarmentSlot(category: GarmentCategory): GarmentSlot {
-  return category === 'bottoms' ? 'bottoms' : category === 'onepiece' ? 'onepiece' : 'tops'
-}
-
-export type OcclusionSegment = 'upper' | 'forearm' | 'thigh' | 'shin'
-
-export interface Garment3DFit {
-  /** Applied before measuring markers/bounds; Euler XYZ, radians. */
-  rotation?: [number, number, number]
-  /** Approximate GLB fallback only. Prefer actual AR_* marker nodes. */
-  anchorSpan?: number
-  anchorHeight?: number
-  anchorDepth?: number
-  /** Onepiece only; requires both GLB hip markers. Otherwise uniform fit. */
-  fitTorsoLength?: boolean
-
-  /** Visual adjustments AFTER anchor normalization, BEFORE body tracking.
-   * Defaults: scale/scaleX/scaleY/scaleZ=1; offsets=0.
-   * These never change the anatomical tracking root or occluder placement.
-   */
-  scale?: number
-  scaleX?: number
-  scaleY?: number
-  scaleZ?: number
-  /** Offsets in normalized primary anchor-width units (not pixels/meters).
-   * +X: wearer's left; +Y: up; +Z: garment front. Mirroring remains external.
-   */
-  offsetX?: number
-  offsetY?: number
-  offsetZ?: number
-}
-
-export interface OcclusionOverride {
-  enabled?: boolean
-  radiusRatio?: number
-  startFraction?: number
-  endFraction?: number
-}
-
-export const garmentGenderLabels: Record<GarmentGender, string> = {
-  men: '男性向け',
-  women: '女性向け',
-  unisex: '男女共用',
-}
-
-// The latest repository lists tshirt1.glb, not the old tshirt.glb.
-export const DEFAULT_GARMENT_MODEL_URL =
-  `${import.meta.env.BASE_URL}garments/tshirt1.glb`
-
-export interface Garment {
-  id: string
-  name: string
-  image: string
-  modelUrl?: string
-  gender: GarmentGender
-  category: GarmentCategory
-  fit3D?: Garment3DFit
-  occlusion3D?: Partial<Record<OcclusionSegment, OcclusionOverride>>
-  /** Legacy 2D renderer configuration. NOT used to fit the GLB. */
-  anchors: {
-    leftShoulder: Point
-    rightShoulder: Point
-    leftHip: Point
-    rightHip: Point
-  }
-  scaleX: number
-  scaleY: number
-  offsetX: number
-  offsetY: number
-  rotationOffset: number
-}
-
-export function filterGarments(
-  catalog: readonly Garment[],
-  filter: GarmentFilter,
-): readonly Garment[] {
-  return filter === 'all'
-    ? catalog
-    : catalog.filter(
-        (garment) => garment.gender === filter || garment.gender === 'unisex',
-      )
-}
-
-const base = import.meta.env.BASE_URL
-
-// Retained for compatibility with the legacy PNG geometry tests/tools.
-// These are not calibrated 2D anchors for the newly added icons.
-const legacy2D = {
-  anchors: {
-    leftShoulder: { x: 0.78, y: 0.14 },
-    rightShoulder: { x: 0.22, y: 0.14 },
-    leftHip: { x: 0.72, y: 0.88 },
-    rightHip: { x: 0.28, y: 0.88 },
-  },
-  scaleX: 1,
-  scaleY: 1,
-  offsetX: 0,
-  offsetY: 0,
-  rotationOffset: 0,
-}
-
-export const demoGarment: Garment = {
-  ...legacy2D,
-  id: 'tshirt-1',
-  name: 'Tシャツ / 01',
-  image: `${base}garments/tshirt1_icon.png`,
-  modelUrl: DEFAULT_GARMENT_MODEL_URL,
-  gender: 'unisex',
-  category: 'tshirt',
-}
-
-// Gender labels are demo metadata, not inferred from the model geometry.
-// Catalog order is shared by swipes, buttons and thumbnails.
-export const garments: readonly Garment[] = [
-  demoGarment,
-  {
-    ...legacy2D,
-    id: 'tshirt-2',
-    name: 'Tシャツ / 02',
-    image: `${base}garments/tshirt2_icon.png`,
-    modelUrl: `${base}garments/tshirt2.glb`,
-    gender: 'unisex',
-    category: 'tshirt',
-  },
-  {
-    ...legacy2D,
-    id: 'pants',
-    name: 'ズボン',
-    image: `${base}garments/pants_icon.png`,
-    modelUrl: `${base}garments/pants.glb`,
-    gender: 'unisex',
-    category: 'bottoms',
-    fit3D: {
-      scaleX: 1.5,
-      scaleY: 2.8,
-      offsetY: 0.1,
-    },
-  },
-  {
-    ...legacy2D,
-    id: 'skirt',
-    name: 'スカート',
-    image: `${base}garments/skirt_icon.png`,
-    modelUrl: `${base}garments/skirt.glb`,
-    gender: 'unisex',
-    category: 'bottoms',
-    fit3D: {
-      scaleX: 1.5,
-      scaleY: 2.8,
-      offsetY: 0.1,
-    },
-  },
-  {
-    ...legacy2D,
-    id: 'dress',
-    name: 'ワンピース',
-    image: `${base}garments/dress_icon.png`,
-    modelUrl: `${base}garments/dress.glb`,
-    gender: 'unisex',
-    category: 'onepiece',
-    // fit3D: { fitTorsoLength: true },
-    fit3D: {
-      scaleX: 1.5,
-      scaleY: 1.8,
-      offsetY: 0.1,
-    },
-  },
-]
 </file>
 
 <file path="src/app/styles.css">
@@ -7212,6 +7943,229 @@ h1 span {
 }
 </file>
 
+<file path="src/features/wardrobe/garments.ts">
+/** Legacy PNG coordinates; independent of GLB anchors. */
+export interface Point {
+  x: number
+  y: number
+}
+
+export type GarmentGender = 'men' | 'women' | 'unisex'
+export type GarmentFilter = 'all' | Exclude<GarmentGender, 'unisex'>
+export type GarmentCategory =
+  | 'tshirt'
+  | 'shirt'
+  | 'jacket'
+  | 'bottoms'
+  | 'onepiece'
+
+/**
+ * UI / outfit slots are intentionally only two groups.
+ * A onepiece is browsed and selected from the tops slot, but remains
+ * category='onepiece' so 3D fitting/occlusion can keep its full-body behavior.
+ */
+export type GarmentSlot = 'tops' | 'bottoms'
+
+export const garmentSlotLabels: Record<GarmentSlot, string> = {
+  tops: 'トップス',
+  bottoms: 'ボトムス',
+}
+
+export function getGarmentSlot(category: GarmentCategory): GarmentSlot {
+  return category === 'bottoms' ? 'bottoms' : 'tops'
+}
+
+export type OcclusionSegment = 'upper' | 'forearm' | 'thigh' | 'shin'
+
+export interface Garment3DFit {
+  /** Applied before measuring markers/bounds; Euler XYZ, radians. */
+  rotation?: [number, number, number]
+  /** Approximate GLB fallback only. Prefer actual AR_* marker nodes. */
+  anchorSpan?: number
+  anchorHeight?: number
+  anchorDepth?: number
+  /** Onepiece only; requires both GLB hip markers. Otherwise uniform fit. */
+  fitTorsoLength?: boolean
+
+  /** Visual adjustments AFTER anchor normalization, BEFORE body tracking.
+   * Defaults: scale/scaleX/scaleY/scaleZ=1; offsets=0.
+   * These never change the anatomical tracking root or occluder placement.
+   */
+  scale?: number
+  scaleX?: number
+  scaleY?: number
+  scaleZ?: number
+  /** Offsets in normalized primary anchor-width units (not pixels/meters).
+   * +X: wearer's left; +Y: up; +Z: garment front. Mirroring remains external.
+   */
+  offsetX?: number
+  offsetY?: number
+  offsetZ?: number
+
+  /**
+   * Outfit-layer bias, also in normalized primary anchor-width units.
+   * This is separate from offsetZ so calibration and top/bottom overlap can be
+   * tuned independently. Negative values move the garment farther from the
+   * camera along its local back direction.
+   *
+   * Defaults in GarmentOverlay:
+   *   tops/onepiece: 0
+   *   bottoms:      -0.035
+   */
+  layerOffsetZ?: number
+
+  /**
+   * Deterministic draw ordering, mainly relevant while garments are fading and
+   * therefore transparent. Opaque overlap is still resolved by the depth buffer.
+   * Defaults: tops=20, bottoms=10, onepiece=20.
+   */
+  renderOrder?: number
+}
+
+export interface OcclusionOverride {
+  enabled?: boolean
+  radiusRatio?: number
+  startFraction?: number
+  endFraction?: number
+}
+
+export const garmentGenderLabels: Record<GarmentGender, string> = {
+  men: '男性向け',
+  women: '女性向け',
+  unisex: '男女共用',
+}
+
+// The latest repository lists tshirt1.glb, not the old tshirt.glb.
+export const DEFAULT_GARMENT_MODEL_URL =
+  `${import.meta.env.BASE_URL}garments/tshirt1.glb`
+
+export interface Garment {
+  id: string
+  name: string
+  image: string
+  modelUrl?: string
+  gender: GarmentGender
+  category: GarmentCategory
+  fit3D?: Garment3DFit
+  occlusion3D?: Partial<Record<OcclusionSegment, OcclusionOverride>>
+  /** Legacy 2D renderer configuration. NOT used to fit the GLB. */
+  anchors: {
+    leftShoulder: Point
+    rightShoulder: Point
+    leftHip: Point
+    rightHip: Point
+  }
+  scaleX: number
+  scaleY: number
+  offsetX: number
+  offsetY: number
+  rotationOffset: number
+}
+
+export function filterGarments(
+  catalog: readonly Garment[],
+  filter: GarmentFilter,
+): readonly Garment[] {
+  return filter === 'all'
+    ? catalog
+    : catalog.filter(
+        (garment) => garment.gender === filter || garment.gender === 'unisex',
+      )
+}
+
+const base = import.meta.env.BASE_URL
+
+// Retained for compatibility with the legacy PNG geometry tests/tools.
+// These are not calibrated 2D anchors for the newly added icons.
+const legacy2D = {
+  anchors: {
+    leftShoulder: { x: 0.78, y: 0.14 },
+    rightShoulder: { x: 0.22, y: 0.14 },
+    leftHip: { x: 0.72, y: 0.88 },
+    rightHip: { x: 0.28, y: 0.88 },
+  },
+  scaleX: 1,
+  scaleY: 1,
+  offsetX: 0,
+  offsetY: 0,
+  rotationOffset: 0,
+}
+
+export const demoGarment: Garment = {
+  ...legacy2D,
+  id: 'tshirt-1',
+  name: 'Tシャツ / 01',
+  image: `${base}garments/tshirt1_icon.png`,
+  modelUrl: DEFAULT_GARMENT_MODEL_URL,
+  gender: 'unisex',
+  category: 'tshirt',
+}
+
+// Catalog order is also the swipe order inside each slot.
+// Because onepiece maps to 'tops', the default order below is:
+// T-shirt 01 -> T-shirt 02 -> onepiece -> T-shirt 01 ...
+export const garments: readonly Garment[] = [
+  demoGarment,
+  {
+    ...legacy2D,
+    id: 'tshirt-2',
+    name: 'Tシャツ / 02',
+    image: `${base}garments/tshirt2_icon.png`,
+    modelUrl: `${base}garments/tshirt2.glb`,
+    gender: 'unisex',
+    category: 'tshirt',
+  },
+  {
+    ...legacy2D,
+    id: 'pants',
+    name: 'ズボン',
+    image: `${base}garments/pants_icon.png`,
+    modelUrl: `${base}garments/pants.glb`,
+    gender: 'unisex',
+    category: 'bottoms',
+    fit3D: {
+      scaleX: 1.5,
+      scaleY: 2.8,
+      offsetY: 0.1,
+      // Keep waist geometry slightly behind tops at the overlap boundary.
+      layerOffsetZ: -0.05,
+      renderOrder: 10,
+    },
+  },
+  {
+    ...legacy2D,
+    id: 'skirt',
+    name: 'スカート',
+    image: `${base}garments/skirt_icon.png`,
+    modelUrl: `${base}garments/skirt.glb`,
+    gender: 'unisex',
+    category: 'bottoms',
+    fit3D: {
+      scaleX: 1.5,
+      scaleY: 2.8,
+      offsetY: 0.1,
+      // Keep waist geometry slightly behind tops at the overlap boundary.
+      layerOffsetZ: -0.05,
+      renderOrder: 10,
+    },
+  },
+  {
+    ...legacy2D,
+    id: 'dress',
+    name: 'ワンピース',
+    image: `${base}garments/dress_icon.png`,
+    modelUrl: `${base}garments/dress.glb`,
+    gender: 'unisex',
+    category: 'onepiece',
+    fit3D: {
+      scaleX: 1.5,
+      scaleY: 1.8,
+      offsetY: 0.1,
+    },
+  },
+]
+</file>
+
 <file path="README.md">
 # Realtime AR Try-On — Virtual Try-On
 
@@ -7453,6 +8407,13 @@ async function getPosePublisher() {
 function tab(name: string) { fireEvent.click(screen.getByRole('tab', { name })) }
 function choose(name: string) { fireEvent.click(screen.getByRole('button', { name: `${name}を選ぶ` })) }
 function worn() { return screen.queryAllByTestId('worn-garment').map(node => node.textContent) }
+function makeFocusFrame(timestamp: number, raised: boolean) {
+  const left = makeSwipeFrame(timestamp, 0, 15, raised ? -0.4 : 0.7)
+  const right = makeSwipeFrame(timestamp, 0, 16, raised ? -0.4 : 0.7)
+  const landmarks = left.landmarks.map((point) => ({ ...point }))
+  landmarks[16] = { ...right.landmarks[16] }
+  return { ...left, landmarks }
+}
 async function start() {
   getUserMedia.mockResolvedValue(fakeStream().stream)
   render(<CameraView />)
@@ -7479,10 +8440,10 @@ describe('CameraView', () => {
   it('browses only focused candidates without opening the camera', () => {
     render(<CameraView />)
     expect(screen.getByRole('tab', { name: 'トップス' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pantsを選ぶ' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '次の服' }))
-    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
     expect(getUserMedia).not.toHaveBeenCalled()
   })
 
@@ -7502,17 +8463,35 @@ describe('CameraView', () => {
     expect(getUserMedia).toHaveBeenCalledOnce()
   })
 
-  it('makes onepiece exclusive and leaves it on until another garment is selected', async () => {
+  it('lists onepiece in tops, hides remembered bottoms, and restores them when returning to a top', async () => {
     await start()
-    tab('ボトムス'); choose('Pants')
-    tab('ワンピース')
-    expect(worn()).toEqual(['Top A', 'Pants'])
+    tab('ボトムス')
+    choose('Pants')
+    tab('トップス')
+    expect(screen.getByRole('button', { name: 'Dressを選ぶ' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'ワンピース' })).not.toBeInTheDocument()
     choose('Dress')
     expect(worn()).toEqual(['Dress'])
-    tab('トップス')
+
+    tab('ボトムス')
+    expect(
+      screen.getByRole('button', { name: 'Pantsを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
     expect(worn()).toEqual(['Dress'])
+
+    tab('トップス')
     choose('Top A')
-    expect(worn()).toEqual(['Top A'])
+    expect(worn()).toEqual(['Top A', 'Pants'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('removes a worn onepiece when bottoms are selected', async () => {
+    await start()
+    choose('Dress')
+    expect(worn()).toEqual(['Dress'])
+    tab('ボトムス')
+    choose('Pants')
+    expect(worn()).toEqual(['Pants'])
     expect(startPoseSession).toHaveBeenCalledOnce()
   })
 
@@ -7524,9 +8503,9 @@ describe('CameraView', () => {
     expect(screen.queryByRole('button', { name: 'Top Bを選ぶ' })).not.toBeInTheDocument()
     choose('Top A')
     expect(worn()).toEqual(['Top A'])
-    tab('ワンピース')
-    fireEvent.click(screen.getByRole('radio', { name: '男性' }))
-    expect(screen.getByText(/このカテゴリの服はまだありません/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '女性' }))
+    expect(screen.getByRole('button', { name: 'Dressを選ぶ' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Top Bを選ぶ' })).not.toBeInTheDocument()
     expect(worn()).toEqual(['Top A'])
   })
 
@@ -7537,9 +8516,64 @@ describe('CameraView', () => {
     tab('ボトムス')
     act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(1000 + i * 80, x))))
     expect(worn()).toEqual(['Top B', 'Pants'])
-    fireEvent.click(screen.getByRole('checkbox', { name: '手のスワイプで切り替え' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '手のジェスチャーで切り替え' }))
     act(() => [-0.5, -0.2, 0.1, 0.4].forEach((x, i) => publish(makeSwipeFrame(3000 + i * 80, x))))
     expect(worn()).toEqual(['Top B', 'Pants'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('toggles the focused slot after both hands stay above the shoulders', async () => {
+    const publish = await start()
+
+    expect(
+      screen.getByRole('tab', { name: 'トップス' }),
+    ).toHaveAttribute('aria-selected', 'true')
+
+    act(() => {
+      for (const time of [0, 100, 200, 300]) {
+        publish(makeFocusFrame(time, false))
+      }
+
+      for (const time of [400, 600, 800, 1000, 1120]) {
+        publish(makeFocusFrame(time, true))
+      }
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('tab', { name: 'ボトムス' }),
+      ).toHaveAttribute('aria-selected', 'true'),
+    )
+
+    expect(worn()).toEqual(['Top A'])
+    expect(startPoseSession).toHaveBeenCalledOnce()
+  })
+
+  it('swipes seamlessly from a top to onepiece while preserving the hidden bottom selection', async () => {
+    const publish = await start()
+    choose('Top B')
+    tab('ボトムス')
+    choose('Pants')
+    tab('トップス')
+    expect(worn()).toEqual(['Top B', 'Pants'])
+
+    act(() =>
+      [-0.5, -0.2, 0.1, 0.4].forEach((x, index) =>
+        publish(makeSwipeFrame(2000 + index * 80, x)),
+      ),
+    )
+
+    expect(worn()).toEqual(['Dress'])
+
+    tab('ボトムス')
+    expect(
+      screen.getByRole('button', { name: 'Pantsを選ぶ' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(worn()).toEqual(['Dress'])
+
+    tab('トップス')
+    choose('Top A')
+    expect(worn()).toEqual(['Top A', 'Pants'])
     expect(startPoseSession).toHaveBeenCalledOnce()
   })
 
@@ -8358,6 +9392,12 @@ export function CameraView() {
     dispatch({ type: 'cycle', direction })
   }, [])
 
+  // Stable callback: the reducer toggles from its current focus, so the
+  // gesture never closes over an outdated tops/bottoms value.
+  const onToggleFocus = useCallback(() => {
+    dispatch({ type: 'toggle-focus' })
+  }, [])
+
   function onWardrobeAction(action: OutfitAction) {
     dispatch(action)
     setGestureResetKey(key => key + 1)
@@ -8750,8 +9790,10 @@ export function CameraView() {
                       showGarment
                     }
                     garments={worn}
-                    swipeEnabled={
-                      swipeEnabled &&
+                    gestureEnabled={
+                      swipeEnabled
+                    }
+                    canSwipe={
                       canCycle
                     }
                     gestureResetKey={
@@ -8759,6 +9801,9 @@ export function CameraView() {
                     }
                     onSwipe={
                       onSwipe
+                    }
+                    onToggleFocus={
+                      onToggleFocus
                     }
                   />
                 )}
@@ -8918,11 +9963,11 @@ export function CameraView() {
 
               <div>
                 <strong>
-                  胸の高さで手をスワイプ
+                  手のジェスチャーで操作
                 </strong>
 
                 <p>
-                  正面を向いて肩・腰・手首を映します。切り替わったら手を少し止めて、次の操作へ。
+                  片手を胸の高さで横へスワイプすると服を変更。両手首を肩より上に約0.7秒キープすると、トップス／ボトムスの操作対象を切り替えます。
                 </p>
               </div>
             </li>
@@ -8974,7 +10019,7 @@ export function CameraView() {
 
           <label className="mirror-toggle">
             <span>
-              手のスワイプで切り替え
+              手のジェスチャーで切り替え
             </span>
 
             <input
@@ -8983,8 +10028,7 @@ export function CameraView() {
                 swipeEnabled
               }
               disabled={
-                !showGarment ||
-                !canCycle
+                !showGarment
               }
               onChange={(event) =>
                 setSwipeEnabled(
