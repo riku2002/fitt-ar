@@ -276,10 +276,10 @@ export const garments: readonly Garment[] = [
     category: 'bottoms',
 
     fit3D: {
-      scaleX: 1.5,
-      scaleY: 2.8,
-
-      offsetY: 0.1,
+      // Measured waistband width / full GLB width at 97% of model height.
+      // Fit the waist with uniform scaling so the authored leg length remains intact.
+      anchorSpan: 0.56,
+      anchorHeight: 0.97,
 
       /**
        * Keep waist geometry slightly behind tops at the overlap boundary.
@@ -303,10 +303,10 @@ export const garments: readonly Garment[] = [
     category: 'bottoms',
 
     fit3D: {
-      scaleX: 1.5,
-      scaleY: 2.8,
-
-      offsetY: 0.1,
+      // The flared hem is much wider than the waistband. Calibrate against
+      // the measured waist, rather than stretching a hem-based generic fit.
+      anchorSpan: 0.365,
+      anchorHeight: 0.97,
 
       /**
        * Keep waist geometry slightly behind tops at the overlap boundary.
