@@ -888,9 +888,11 @@ export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayP
         data-model-urls={JSON.stringify(entries.map(entry => entry.modelUrl))}
         data-fit-axis={entries.length === 1 ? (entries[0].slot === 'bottoms' ? 'hips' : 'shoulders') : 'outfit'}>
         <ModelErrorBoundary key={canvasAttempt} onError={onCanvasError}>
+          {/* Canvas mounts fallback even when WebGL works. Only the error
+              boundary should report a renderer failure. */}
           <Canvas shadows
             camera={{ position: [0, 0, CAMERA_Z], fov: CAMERA_FOV, near: 0.1, far: 100 }}
-            gl={{ alpha: true, antialias: true }} fallback={<WebGLFallback onError={onCanvasError} />}>
+            gl={{ alpha: true, antialias: true }} fallback="試着する服の3Dモデル">
             <ambientLight intensity={1} />
             <directionalLight position={[0, 0, 5]} intensity={1.5} />
             <directionalLight position={[-5, 5, 2]} intensity={0.5} castShadow

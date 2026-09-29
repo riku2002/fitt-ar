@@ -16,18 +16,22 @@ const harness = vi.hoisted(() => ({
   clear: vi.fn(),
   canvasMount: vi.fn(),
   canvasUnmount: vi.fn(),
+  canvasError: null as Error | null,
 }))
 
 // Test the actual selection/loading/lifecycle logic without a WebGL renderer.
 vi.mock('@react-three/fiber', async () => {
   const { createElement, Fragment, useEffect } = await import('react')
   return {
-    Canvas: function CanvasDouble({ children }: { children: ReactNode }) {
+    Canvas: function CanvasDouble({ children, fallback }: { children: ReactNode; fallback?: ReactNode }) {
       useEffect(() => {
         harness.canvasMount()
         return () => { harness.canvasUnmount() }
       }, [])
-      return createElement(Fragment, null, children)
+      if (harness.canvasError) throw harness.canvasError
+      // R3F always mounts this DOM fallback inside <canvas>, including when
+      // WebGL works. It is not an error callback or a Suspense fallback.
+      return createElement(Fragment, null, createElement('canvas', null, fallback), children)
     },
     useFrame: vi.fn(),
   }
@@ -134,6 +138,7 @@ beforeEach(() => {
   harness.clear.mockReset()
   harness.canvasMount.mockClear()
   harness.canvasUnmount.mockClear()
+  harness.canvasError = null
   vi.mocked(clone).mockClear()
   vi.mocked(startPoseSession).mockClear()
   ready(DEFAULT_GARMENT_MODEL_URL)
@@ -151,6 +156,31 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   vi.useRealTimers()
+})
+
+it('keeps normal model feedback visible when Canvas mounts its fallback content', () => {
+  const source = createPoseChannel()
+  render(<GarmentOverlay source={source} garment={demoGarment} mirrored />)
+
+  expect(screen.getByRole('status')).toHaveTextContent('両肩を映し、少し静止してください')
+  expect(screen.queryByRole('button', { name: '3D描画を再起動' })).not.toBeInTheDocument()
+})
+
+it('reports a real Canvas failure and recovers through the restart button', () => {
+  harness.canvasError = new Error('Intentional WebGL initialization failure')
+  const source = createPoseChannel()
+  const subscribe = vi.spyOn(source, 'subscribe')
+  render(<GarmentOverlay source={source} garment={demoGarment} mirrored />)
+
+  const restart = screen.getByRole('button', { name: '3D描画を再起動' })
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+  harness.canvasError = null
+  fireEvent.click(restart)
+
+  expect(screen.queryByRole('button', { name: '3D描画を再起動' })).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('両肩を映し、少し静止してください')
+  expect(subscribe).toHaveBeenCalledOnce()
+  expect(harness.load).toHaveBeenLastCalledWith(DEFAULT_GARMENT_MODEL_URL)
 })
 
 it('loads the selected URL, disposes the old instance, and preserves Canvas and the pose subscription', () => {
