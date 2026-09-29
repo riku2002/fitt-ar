@@ -45,8 +45,11 @@ export interface Garment3DFit {
   anchorHeight?: number
   anchorDepth?: number
 
-  /** Onepiece only; requires both GLB hip markers. Otherwise uniform fit. */
+  /** Shoulder-based garments: use hip markers or calibrated torsoAnchorHeight. */
   fitTorsoLength?: boolean
+
+  /** Anatomical hip height in rotated model bounds (0–1), not the waist seam. */
+  torsoAnchorHeight?: number
 
   /** Bottoms: hem position as a fraction of standing hip-to-ankle length.
    * Omit to keep authored proportions. Automatic stretch is limited to 70–135%. */
@@ -336,10 +339,10 @@ export const garments: readonly Garment[] = [
     category: 'onepiece',
 
     fit3D: {
-      scaleX: 1.5,
-      scaleY: 1.8,
-
-      offsetY: 0.1,
+      anchorSpan: 0.34,
+      anchorHeight: 0.93,
+      torsoAnchorHeight: 0.52,
+      fitTorsoLength: true,
     },
   },
 
@@ -451,11 +454,13 @@ export const garments: readonly Garment[] = [
 
     fit3D: {
       /**
-       * If AR_LeftHip / AR_RightHip exist inside the GLB,
-       * GarmentOverlay can additionally use them for bounded torso-length
-       * fitting.
+       * Markerless asset: calibrate shoulder width and anatomical hip height.
+       * Authored AR_LeftHip / AR_RightHip markers take precedence if added.
        */
       fitTorsoLength: true,
+      anchorSpan: 0.88,
+      anchorHeight: 0.93,
+      torsoAnchorHeight: 0.42,
 
       /**
        * Neutral starting calibration.

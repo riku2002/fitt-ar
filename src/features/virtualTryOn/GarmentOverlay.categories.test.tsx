@@ -350,3 +350,53 @@ it('keeps the same body proportion when camera distance and viewport size change
   expect(root().scale.y / root().scale.x).toBeCloseTo(ratio, 2)
   expectMarkerFits(farther, 'AR_LeftHip', 23)
 })
+
+
+it('fits calibrated markerless dresses to different torso lengths at the same shoulder width', () => {
+  const { source } = setup('onepiece', false, {
+    fit3D: { anchorSpan: 0.6, anchorHeight: 0.93, torsoAnchorHeight: 0.42 },
+  })
+  const short = frame()
+  short.landmarks[23].y = short.landmarks[24].y = 0.45
+  acquire(source, short); draw(2)
+  const width = root().scale.x
+  const shortLength = root().scale.y
+  const origin = root().position.clone()
+  const long = frame()
+  long.landmarks[23].y = long.landmarks[24].y = 0.56
+  acquire(source, long); draw(2)
+  expect(root().scale.x).toBeCloseTo(width, 8)
+  expect(root().scale.y / shortLength).toBeCloseTo(0.36 / 0.25, 8)
+  expect(root().position.distanceTo(origin)).toBeLessThan(1e-8)
+})
+
+it('returns calibrated torso fit to neutral after prolonged hip loss', () => {
+  const { source } = setup('onepiece', false, {
+    fit3D: { torsoAnchorHeight: 0.42 },
+  })
+  acquire(source); draw(2)
+  expect(root().scale.y / root().scale.x).not.toBeCloseTo(1, 3)
+  const hidden = frame()
+  hidden.landmarks[23].visibility = hidden.landmarks[24].visibility = 0
+  const held = root().scale.y / root().scale.x
+  emit(source, hidden); draw(2)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(held, 8)
+  for (let i = 0; i < 15; i++) emit(source, hidden)
+  draw(2)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1, 8)
+})
+
+it('prefers authored hip markers over a fallback torso calibration', () => {
+  const { source } = setup('onepiece', true, { fit3D: { torsoAnchorHeight: 0.1 } })
+  acquire(source)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1.25, 8)
+})
+
+it('supports opt-in torso fitting for tops while keeping shoulder markers aligned', () => {
+  const { source } = setup('tshirt', true, { fit3D: { fitTorsoLength: true } })
+  const pose = frame()
+  acquire(source, pose)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1.25, 8)
+  expectMarkerFits(pose, 'AR_LeftShoulder', 11)
+  expectMarkerFits(pose, 'AR_RightShoulder', 12)
+})

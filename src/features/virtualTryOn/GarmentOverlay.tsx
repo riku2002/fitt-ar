@@ -108,6 +108,7 @@ interface Profile {
   span: number
   height: number
   depth: number
+  torsoHeight: number | undefined
   fitTorso: boolean
   legLengthRatio: number | undefined
   visualScale: [number, number, number]
@@ -164,7 +165,8 @@ function resolveProfile(
     span: fitting?.anchorSpan ?? (bottom ? 0.65 : dress ? 0.50 : 0.60),
     height: fitting?.anchorHeight ?? (bottom ? 0.88 : dress ? 0.93 : 0.84),
     depth: fitting?.anchorDepth ?? 0.50,
-    fitTorso: dress && (fitting?.fitTorsoLength ?? true),
+    torsoHeight: fitting?.torsoAnchorHeight,
+    fitTorso: !bottom && (fitting?.fitTorsoLength ?? dress),
     legLengthRatio: bottom ? fitting?.legLengthRatio : undefined,
     visualScale: [
       (fitting?.scale ?? 1) * (fitting?.scaleX ?? 1),
@@ -380,6 +382,10 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
       !profile.visualScale.every(value => Number.isFinite(value) && value > 0) ||
       !profile.visualOffset.every(Number.isFinite) ||
       !Number.isFinite(profile.renderOrder)) throw new Error('Invalid fit3D calibration')
+  if (profile.torsoHeight !== undefined && (!Number.isFinite(profile.torsoHeight) ||
+      profile.torsoHeight < 0 || profile.torsoHeight >= profile.height)) {
+    throw new Error('Invalid torsoAnchorHeight')
+  }
   const asset = clone(scene)
   const oriented = new THREE.Group()
   oriented.rotation.set(...profile.rotation)
@@ -415,13 +421,18 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
   normalized.position.copy(center).applyQuaternion(rotation).multiplyScalar(-1 / width)
   normalized.add(oriented)
   normalized.updateMatrixWorld(true)
-  // Optional torso reference. Never invent the torso length from the dress hem.
+  // Explicit anatomical reference; uncalibrated assets retain authored proportions.
   const hl = asset.getObjectByName('AR_LeftHip')
   const hr = asset.getObjectByName('AR_RightHip')
   let hipCenter: THREE.Vector3 | null = null
   if (profile.fitTorso && hl && hr) {
     hipCenter = hl.getWorldPosition(new THREE.Vector3())
       .add(hr.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5)
+  } else if (profile.fitTorso && profile.torsoHeight !== undefined) {
+    hipCenter = new THREE.Vector3(center.x, box.min.y + size.y * profile.torsoHeight, center.z)
+      .sub(center).applyQuaternion(rotation).divideScalar(width)
+  }
+  if (hipCenter) {
     if (![hipCenter.x, hipCenter.y, hipCenter.z].every(Number.isFinite) || hipCenter.y >= -EPS) {
       throw new Error('Dress hip markers must be below the shoulder origin')
     }
@@ -435,6 +446,10 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
   visual.scale.set(...profile.visualScale)
   visual.add(normalized)
   visual.updateMatrixWorld(true)
+  if (hipCenter) {
+    hipCenter.multiply(visual.scale).add(visual.position)
+    if (hipCenter.y >= -EPS) throw new Error('Calibrated hip reference must be below shoulders')
+  }
 
   // Safety checks must cover calibrated vertices, not the unadjusted asset.
   const bounds = new THREE.Box3().setFromObject(visual, true)
@@ -692,7 +707,7 @@ function advanceInstance(item: Instance, profile: Profile, target: Target,
         // Brief occlusion holds the fit; prolonged loss returns smoothly to neutral.
         if (pose.timestamp - item.lastLengthFit > 1000) item.stretch = 1
       }
-      // Dress: bounded longitudinal fit only when real GLB hip markers exist.
+      // Bounded torso fit using authored markers or an explicit asset calibration.
       // The anchor line has local Y=0, so its exact horizontal fit is unchanged.
       if (profile.fitTorso && item.hipCenter && pose.hips && pose.hips.confidence >= 0.65) {
         const hc = item.hipCenter
@@ -704,9 +719,13 @@ function advanceInstance(item: Instance, profile: Profile, target: Target,
           s.inverse.copy(s.rotation).invert()
           s.hip.sub(s.position).applyQuaternion(s.inverse).divideScalar(result.scale)
           const ratio = s.hip.y / hc.y
-          if (Number.isFinite(ratio) && ratio > 0) item.stretch = THREE.MathUtils.clamp(ratio, 0.80, 1.25)
+          if (Number.isFinite(ratio) && ratio > 0) {
+            item.stretch = THREE.MathUtils.clamp(ratio, 0.80, 1.25)
+            item.lastLengthFit = pose.timestamp
+          }
         }
       }
+      if (profile.fitTorso && pose.timestamp - item.lastLengthFit > 1000) item.stretch = 1
       s.scale.set(result.scale, result.scale * item.stretch, result.scale)
       let safe = true
       for (const corner of item.corners) {
