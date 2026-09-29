@@ -863,42 +863,7 @@ export function CameraView() {
             </span>
           </div>
         </div>
-      </div>
-      <aside className="control-panel" aria-labelledby="setup-title">
-        {isPlaying || isRequesting ? (
-          <button className="primary-button stop-button" onClick={stop}>
-            {isRequesting ? '接続をキャンセル' : 'カメラを停止'}
-            <span aria-hidden="true">□</span>
-          </button>
-        ) : (
-          <button className="primary-button" onClick={() => void start()}>
-            {status === 'error' ? 'もう一度試す' : 'カメラを起動'}
-            <span aria-hidden="true">↗</span>
-          </button>
-        )}
-        {error && (
-          <p className="error-message" role="alert">
-            {error}
-          </p>
-        )}
-        {isRequesting && (
-          <p className="pending-message">
-            許可画面が出ない場合は、アドレスバーのカメラ権限を確認してください。
-          </p>
-        )}
-        <GarmentSelector
-          garments={filteredGarments}
-          index={garmentIndex}
-          filter={garmentFilter}
-          onFilterChange={selectFilter}
-          onSelect={selectGarment}
-        />
-        {filteredGarments.length > 1 && (
-          <p className="swipe-guide">
-            画面で 右 → 左：次の服
-            <br />左 → 右：前の服
-          </p>
-
+        <aside className="control-panel" aria-label="試着の設定">
           {isPlaying ||
           isRequesting ? (
             <button
