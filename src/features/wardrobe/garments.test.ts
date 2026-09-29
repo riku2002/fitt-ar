@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { demoGarment, filterGarments } from './garments'
+import {
+  DEFAULT_GARMENT_MODEL_URL,
+  demoGarment,
+  filterGarments,
+  garments,
+  garmentSlotLabels,
+  getGarmentSlot,
+} from './garments'
 import type { Garment, GarmentFilter } from './garments'
 
 const catalog: readonly Garment[] = [
@@ -8,6 +15,78 @@ const catalog: readonly Garment[] = [
   { ...demoGarment, id: 'men-1', gender: 'men' },
   { ...demoGarment, id: 'women-2', gender: 'women' },
 ]
+
+describe('garment catalog', () => {
+  it('exports the default GLB URL and gives catalog garments a model URL', () => {
+    expect(DEFAULT_GARMENT_MODEL_URL).toBe(
+      `${import.meta.env.BASE_URL}garments/tshirt1.glb`,
+    )
+
+    expect(demoGarment.modelUrl).toBe(DEFAULT_GARMENT_MODEL_URL)
+
+    for (const garment of garments) {
+      expect(garment.modelUrl).toBeTruthy()
+    }
+  })
+
+  it('registers unique catalog items with valid model/icon paths and supported slots', () => {
+    // The catalog is intentionally extensible. Do not hard-code an exact count:
+    // adding a new garment should not make this test fail merely because the
+    // catalog grew. The original five built-in entries must still be present.
+    expect(garments.length).toBeGreaterThanOrEqual(5)
+
+    expect(new Set(garments.map((item) => item.id)).size).toBe(
+      garments.length,
+    )
+
+    for (const item of garments) {
+      expect(item.id.trim()).not.toBe('')
+      expect(item.name.trim()).not.toBe('')
+
+      if (!item.modelUrl) {
+        throw new Error(`Garment ${item.id} is missing modelUrl`)
+      }
+
+      expect(item.modelUrl).toContain('garments/')
+      expect(item.modelUrl.toLowerCase()).toMatch(/\.glb$/)
+
+      expect(item.image).toContain('garments/')
+      expect(item.image.toLowerCase()).toMatch(/\.(png|webp|jpe?g)$/)
+
+      expect([
+        'tshirt',
+        'shirt',
+        'jacket',
+        'bottoms',
+        'onepiece',
+      ]).toContain(item.category)
+
+      expect(getGarmentSlot(item.category)).toBe(
+        item.category === 'bottoms' ? 'bottoms' : 'tops',
+      )
+    }
+
+    const requiredBuiltIns = [
+      ['tshirt-1', 'tshirt', 'tshirt1'],
+      ['tshirt-2', 'tshirt', 'tshirt2'],
+      ['pants', 'bottoms', 'pants'],
+      ['skirt', 'bottoms', 'skirt'],
+      ['dress', 'onepiece', 'dress'],
+    ] as const
+
+    for (const [id, category, filename] of requiredBuiltIns) {
+      const item = garments.find((garment) => garment.id === id)
+
+      expect(item?.category).toBe(category)
+      expect(item?.modelUrl).toBe(
+        `${import.meta.env.BASE_URL}garments/${filename}.glb`,
+      )
+      expect(item?.image).toBe(
+        `${import.meta.env.BASE_URL}garments/${filename}_icon.png`,
+      )
+    }
+  })
+})
 
 describe('filterGarments', () => {
   it.each<[GarmentFilter, string[]]>([
@@ -20,6 +99,7 @@ describe('filterGarments', () => {
       expect(
         filterGarments(catalog, filter).map((garment) => garment.id),
       ).toEqual(expected)
+
       expect(catalog.map((garment) => garment.id)).toEqual([
         'women-1',
         'shared',
@@ -34,4 +114,17 @@ describe('filterGarments', () => {
     expect(filterGarments([], 'women')).toEqual([])
     expect(filterGarments([catalog[0]], 'men')).toEqual([])
   })
+})
+
+it('exposes only tops and bottoms slots and groups onepiece with tops', () => {
+  expect(garmentSlotLabels).toEqual({
+    tops: 'トップス',
+    bottoms: 'ボトムス',
+  })
+
+  expect(getGarmentSlot('tshirt')).toBe('tops')
+  expect(getGarmentSlot('shirt')).toBe('tops')
+  expect(getGarmentSlot('jacket')).toBe('tops')
+  expect(getGarmentSlot('onepiece')).toBe('tops')
+  expect(getGarmentSlot('bottoms')).toBe('bottoms')
 })
