@@ -286,3 +286,67 @@ it('clears old masks on category switch without replacing the pose subscription'
   expect(maskRoot().children.some(object => object.name.includes('thigh'))).toBe(false)
   expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-fit-axis', 'shoulders')
 })
+
+function proportionalLegs(ankleY: number) {
+  const pose = frame()
+  for (const [hip, knee, ankle] of [[23,25,27],[24,26,28]]) {
+    pose.landmarks[knee].y = (pose.landmarks[hip].y + ankleY) / 2
+    pose.landmarks[ankle].y = ankleY
+  }
+  return pose
+}
+it('adapts hem length to body proportions without moving the hip anchors', () => {
+  const { source } = setup('bottoms', true, { fit3D: { legLengthRatio: 1 } })
+  const short = proportionalLegs(.68)
+  acquire(source, short); draw(.5)
+  const shortLength = root().scale.y / root().scale.x
+  expect(shortLength).toBeLessThan(1)
+  expectMarkerFits(short, 'AR_LeftHip', 23)
+  expectMarkerFits(short, 'AR_RightHip', 24)
+  const long = proportionalLegs(.78)
+  acquire(source, long); draw(.5)
+  expect(root().scale.y / root().scale.x).toBeGreaterThan(shortLength)
+  expectMarkerFits(long, 'AR_LeftHip', 23)
+  expectMarkerFits(long, 'AR_RightHip', 24)
+})
+it('bounds extreme length, holds a brief occlusion and returns to neutral after prolonged loss', () => {
+  const { source } = setup('bottoms', true, { fit3D: { legLengthRatio: 1 } })
+  acquire(source); draw(.5)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1.35, 2)
+  const missing = frame(); missing.landmarks[27].visibility = 0
+  emit(source, missing); draw(.1)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1.35, 2)
+  for (let i = 0; i < 16; i++) emit(source, missing)
+  draw(.5)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1, 2)
+})
+it('does not recalibrate from bent legs or a single fresh frame', () => {
+  const { source } = setup('bottoms', true, { fit3D: { legLengthRatio: 1 } })
+  const bent = frame(); bent.landmarks[25].x = .9
+  acquire(source, bent); draw(.5)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1, 8)
+  emit(source, frame()); draw(.2)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1, 8)
+})
+it('starts a newly acquired person with neutral length when their ankles are not visible', () => {
+  const { source } = setup('bottoms', true, { fit3D: { legLengthRatio: 1 } })
+  acquire(source); draw(.5)
+  emit(source, null); draw(.5)
+  const missing = frame(); missing.landmarks[27].visibility = 0
+  acquire(source, missing)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1, 8)
+})
+it('keeps the same body proportion when camera distance and viewport size change', () => {
+  const { source } = setup('bottoms', true, { fit3D: { legLengthRatio: 1 } })
+  const pose = proportionalLegs(.70)
+  acquire(source, pose); draw(.5)
+  const ratio = root().scale.y / root().scale.x
+  const farther = { ...pose, landmarks: pose.landmarks.map(p => ({ ...p,
+    x: .5 + (p.x - .5) * .8, y: .5 + (p.y - .5) * .8, z: p.z * .8,
+  })) }
+  size = { width: 480, height: 800 }
+  // Let the existing position/scale smoothing converge before exact anchor checks.
+  acquire(source, farther); draw(2)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(ratio, 2)
+  expectMarkerFits(farther, 'AR_LeftHip', 23)
+})
