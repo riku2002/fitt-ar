@@ -48,6 +48,10 @@ export interface Garment3DFit {
   /** Onepiece only; requires both GLB hip markers. Otherwise uniform fit. */
   fitTorsoLength?: boolean
 
+  /** Bottoms: hem position as a fraction of standing hip-to-ankle length.
+   * Omit to keep authored proportions. Automatic stretch is limited to 70–135%. */
+  legLengthRatio?: number
+
   /**
    * Visual adjustments AFTER anchor normalization, BEFORE body tracking.
    * Defaults:
@@ -280,6 +284,7 @@ export const garments: readonly Garment[] = [
       // Fit the waist with uniform scaling so the authored leg length remains intact.
       anchorSpan: 0.56,
       anchorHeight: 0.97,
+      legLengthRatio: 1,
 
       /**
        * Keep waist geometry slightly behind tops at the overlap boundary.
@@ -307,6 +312,7 @@ export const garments: readonly Garment[] = [
       // the measured waist, rather than stretching a hem-based generic fit.
       anchorSpan: 0.365,
       anchorHeight: 0.97,
+      legLengthRatio: 0.8,
 
       /**
        * Keep waist geometry slightly behind tops at the overlap boundary.

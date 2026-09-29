@@ -13,6 +13,8 @@ import type {
 } from '../wardrobe/garments'
 import type { PoseFrame, PosePoint, PoseSource } from '../pose/poseTypes'
 
+import { standingAnkleCenter } from './bodyLengthFit'
+
 const EPS = 1e-8
 const CAMERA_Z = 5
 const CAMERA_FOV = 50
@@ -69,6 +71,7 @@ interface Measurement {
   height: number
   shoulders: Pair | null
   hips: Pair | null
+  ankles: { x: number; y: number } | null
   chains: Record<ChainId, Chain | null>
 }
 interface Observation extends Measurement {
@@ -106,6 +109,7 @@ interface Profile {
   height: number
   depth: number
   fitTorso: boolean
+  legLengthRatio: number | undefined
   visualScale: [number, number, number]
   visualOffset: [number, number, number]
   renderOrder: number
@@ -161,6 +165,7 @@ function resolveProfile(
     height: fitting?.anchorHeight ?? (bottom ? 0.88 : dress ? 0.93 : 0.84),
     depth: fitting?.anchorDepth ?? 0.50,
     fitTorso: dress && (fitting?.fitTorsoLength ?? true),
+    legLengthRatio: bottom ? fitting?.legLengthRatio : undefined,
     visualScale: [
       (fitting?.scale ?? 1) * (fitting?.scaleX ?? 1),
       (fitting?.scale ?? 1) * (fitting?.scaleY ?? 1),
@@ -235,7 +240,7 @@ function measureFrame(frame: PoseFrame | null): Measurement | null {
   }
   return {
     timestamp: frame.timestamp, width: frame.width, height: frame.height,
-    shoulders, hips,
+    shoulders, hips, ankles: standingAnkleCenter(frame),
     chains: {
       leftArm: chain(shoulders, 'left', 13, 15),
       rightArm: chain(shoulders, 'right', 14, 16),
@@ -367,6 +372,8 @@ function createProjector() {
 type Projector = ReturnType<typeof createProjector>
 
 function buildModel(scene: THREE.Object3D, profile: Profile) {
+  if (profile.legLengthRatio !== undefined && (!Number.isFinite(profile.legLengthRatio) ||
+      profile.legLengthRatio <= 0 || profile.legLengthRatio > 1.2)) throw new Error('Invalid legLengthRatio')
   if (![...profile.rotation, profile.span, profile.height, profile.depth].every(Number.isFinite) ||
       profile.span <= 0 || profile.span > 1 || profile.height < 0 || profile.height > 1 ||
       profile.depth < 0 || profile.depth > 1 ||
@@ -466,6 +473,8 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
   root.renderOrder = profile.renderOrder
   root.add(visual)
   return { root, materials, skeletons, shadowCasters, corners, hipCenter,
+    hemLength: -bounds.min.y, lastLengthFit: -Infinity,
+    lengthSince: -Infinity, lengthSamples: 0, lengthTimestamp: -Infinity,
     alpha: 0, placed: false, stretch: 1 }
 }
 
@@ -643,6 +652,10 @@ function advanceInstance(item: Instance, profile: Profile, target: Target,
   const cameraOK = camera instanceof THREE.PerspectiveCamera && s.origin.z > 0 &&
     Math.abs(s.direction.x) < 1e-6 && Math.abs(s.direction.y) < 1e-6 && s.direction.z < 0
   const age = pose ? performance.now() - pose.timestamp : Infinity
+  if (!pose || age >= TRACK.staleMs || document.hidden) {
+    item.stretch = 1; item.lastLengthFit = -Infinity
+    item.lengthSince = -Infinity; item.lengthSamples = 0; item.lengthTimestamp = -Infinity
+  }
   if (!document.hidden && pose && pose.axis === profile.axis && age >= 0 && age < TRACK.staleMs &&
       cameraOK && size.width > 0 && size.height > 0) {
     item.projector.configure(pose, size)
@@ -656,6 +669,29 @@ function advanceInstance(item: Instance, profile: Profile, target: Target,
     if (result) {
       s.position.set(result.x + s.origin.x, result.y + s.origin.y, 0)
       s.rotation.setFromEuler(s.euler.set(0, result.yaw, result.roll, 'ZYX'))
+      // Y=0 is the hip anchor line. Changing length leaves waist position/width fixed.
+      // Require multiple fresh standing observations, not repeated render frames.
+      if (profile.legLengthRatio !== undefined && item.hemLength > EPS) {
+        if (pose.ankles && pose.facing >= TRACK.fullFacing) {
+          if (pose.timestamp !== item.lengthTimestamp) {
+            if (pose.timestamp - item.lengthTimestamp > TRACK.maxGapMs) item.lengthSamples = 0
+            if (item.lengthSamples === 0) item.lengthSince = pose.timestamp
+            item.lengthSamples += 1; item.lengthTimestamp = pose.timestamp
+          }
+          if (item.lengthSamples >= 3 && pose.timestamp - item.lengthSince >= 160 &&
+              item.projector.project(pose.ankles.x, pose.ankles.y, 0, camera, s.hip)) {
+            s.inverse.copy(s.rotation).invert()
+            s.hip.sub(s.position).applyQuaternion(s.inverse).divideScalar(result.scale)
+            const ratio = -s.hip.y * profile.legLengthRatio / item.hemLength
+            if (Number.isFinite(ratio) && ratio > 0) {
+              item.stretch = THREE.MathUtils.clamp(ratio, 0.70, 1.35)
+              item.lastLengthFit = pose.timestamp
+            }
+          }
+        } else { item.lengthSamples = 0; item.lengthTimestamp = -Infinity }
+        // Brief occlusion holds the fit; prolonged loss returns smoothly to neutral.
+        if (pose.timestamp - item.lastLengthFit > 1000) item.stretch = 1
+      }
       // Dress: bounded longitudinal fit only when real GLB hip markers exist.
       // The anchor line has local Y=0, so its exact horizontal fit is unchanged.
       if (profile.fitTorso && item.hipCenter && pose.hips && pose.hips.confidence >= 0.65) {
