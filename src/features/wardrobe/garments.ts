@@ -304,7 +304,7 @@ export const garments: readonly Garment[] = [
     image: `${base}garments/skirt_icon.png`,
     modelUrl: `${base}garments/skirt.glb`,
 
-    gender: 'unisex',
+    gender: 'women',
     category: 'bottoms',
 
     fit3D: {
@@ -332,7 +332,7 @@ export const garments: readonly Garment[] = [
     image: `${base}garments/dress_icon.png`,
     modelUrl: `${base}garments/dress.glb`,
 
-    gender: 'unisex',
+    gender: 'women',
     category: 'onepiece',
 
     fit3D: {
@@ -362,7 +362,7 @@ export const garments: readonly Garment[] = [
     image: `${base}garments/Autumn_girly_top_icon.png`,
     modelUrl: `${base}garments/Autumn_girly_top.glb`,
 
-    gender: 'unisex',
+    gender: 'women',
 
     /**
      * A normal upper-body garment.
@@ -404,7 +404,7 @@ export const garments: readonly Garment[] = [
     image: `${base}garments/black_girly_top_icon.png`,
     modelUrl: `${base}garments/black_girly_top.glb`,
 
-    gender: 'unisex',
+    gender: 'women',
     category: 'shirt',
 
     fit3D: {
@@ -446,7 +446,7 @@ export const garments: readonly Garment[] = [
     image: `${base}garments/white_dress_icon.png`,
     modelUrl: `${base}garments/white_dress.glb`,
 
-    gender: 'unisex',
+    gender: 'women',
     category: 'onepiece',
 
     fit3D: {
