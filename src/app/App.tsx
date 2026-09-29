@@ -15,13 +15,7 @@ export function App() {
           Realtime AR Try-On
         </a>
       </header>
-      <main>
-        <section className="intro" aria-labelledby="page-title">
-          <p className="eyebrow">THE NEXT STEP</p>
-          <h1 id="page-title">
-            Hello, <span>try-on.</span>
-          </h1>
-        </section>
+      <main className="main-content">
         <CameraView />
       </main>
       <footer className="site-footer">

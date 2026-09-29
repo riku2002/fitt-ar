@@ -79,8 +79,8 @@ input:focus-visible {
 .stage-label {
   color: #68746b;
 }
-.intro {
-  padding: 48px 0 34px;
+.main-content {
+  padding-top: 24px;
 }
 .eyebrow {
   color: #60755b;
@@ -727,8 +727,8 @@ h1 span {
     font-size: 8px;
     letter-spacing: 0.5px;
   }
-  .intro {
-    padding: 34px 0 25px;
+  .main-content {
+    padding-top: 20px;
   }
   h1 {
     letter-spacing: -2px;
