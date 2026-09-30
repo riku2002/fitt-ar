@@ -25,6 +25,15 @@ it('rejects a leg pointing toward the camera', () => {
   const frame = standing(); frame.landmarks[25].z = -.4
   expect(standingAnkleCenter(frame)).toBeNull()
 })
+it('tolerates noisy ankle depth when both legs are visibly straight', () => {
+  const frame = standing()
+  frame.landmarks[27].z = .45
+  frame.landmarks[28].z = .45
+  expect(standingAnkleCenter(frame)).toEqual({ x: .5, y: .85 })
+  frame.landmarks[27].z = .6
+  frame.landmarks[28].z = .6
+  expect(standingAnkleCenter(frame)).toBeNull()
+})
 it('rejects missing, offscreen and non-finite coordinates', () => {
   for (const value of [NaN, Infinity, 1.2]) {
     const frame = standing(); frame.landmarks[27].y = value

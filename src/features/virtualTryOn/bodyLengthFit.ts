@@ -20,7 +20,7 @@ export function standingAnkleCenter(frame: PoseFrame): { x: number; y: number } 
     const thigh = Math.hypot(tx, ty), shin = Math.hypot(sx, sy)
     if (ty <= 0 || sy <= 0 || thigh < hipWidth * 0.4 || shin < hipWidth * 0.4 ||
         (tx * sx + ty * sy) / (thigh * shin) < 0.94 ||
-        Math.abs(ankle.z - hip.z) * width > hipWidth ||
+        Math.abs(ankle.z - hip.z) * width > hipWidth * 2.5 ||
         Math.abs(knee.z - hip.z) * width > hipWidth) return null
     return Math.hypot(tx + sx, ty + sy)
   }

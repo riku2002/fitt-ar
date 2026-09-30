@@ -320,6 +320,16 @@ it('bounds extreme length, holds a brief occlusion and returns to neutral after 
   draw(.5)
   expect(root().scale.y / root().scale.x).toBeCloseTo(1, 2)
 })
+it('allows a garment-specific longer hem while preserving hip anchors', () => {
+  const { source } = setup('bottoms', true, {
+    fit3D: { legLengthRatio: 1, maxLegStretch: 1.5 },
+  })
+  const pose = frame()
+  acquire(source, pose); draw(.5)
+  expect(root().scale.y / root().scale.x).toBeCloseTo(1.5, 2)
+  expectMarkerFits(pose, 'AR_LeftHip', 23)
+  expectMarkerFits(pose, 'AR_RightHip', 24)
+})
 it('does not recalibrate from bent legs or a single fresh frame', () => {
   const { source } = setup('bottoms', true, { fit3D: { legLengthRatio: 1 } })
   const bent = frame(); bent.landmarks[25].x = .9
