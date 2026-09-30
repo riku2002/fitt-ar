@@ -110,6 +110,7 @@ interface Profile {
   torsoHeight: number | undefined
   fitTorso: boolean
   legLengthRatio: number | undefined
+  maxLegStretch: number
   visualScale: [number, number, number]
   visualOffset: [number, number, number]
   renderOrder: number
@@ -167,6 +168,7 @@ function resolveProfile(
     torsoHeight: fitting?.torsoAnchorHeight,
     fitTorso: !bottom && (fitting?.fitTorsoLength ?? dress),
     legLengthRatio: bottom ? fitting?.legLengthRatio : undefined,
+    maxLegStretch: bottom ? (fitting?.maxLegStretch ?? 1.35) : 1.35,
     visualScale: [
       (fitting?.scale ?? 1) * (fitting?.scaleX ?? 1),
       (fitting?.scale ?? 1) * (fitting?.scaleY ?? 1),
@@ -375,6 +377,8 @@ type Projector = ReturnType<typeof createProjector>
 function buildModel(scene: THREE.Object3D, profile: Profile) {
   if (profile.legLengthRatio !== undefined && (!Number.isFinite(profile.legLengthRatio) ||
       profile.legLengthRatio <= 0 || profile.legLengthRatio > 1.2)) throw new Error('Invalid legLengthRatio')
+  if (!Number.isFinite(profile.maxLegStretch) || profile.maxLegStretch < 1 ||
+      profile.maxLegStretch > 1.6) throw new Error('Invalid maxLegStretch')
   if (![...profile.rotation, profile.span, profile.height, profile.depth].every(Number.isFinite) ||
       profile.span <= 0 || profile.span > 1 || profile.height < 0 || profile.height > 1 ||
       profile.depth < 0 || profile.depth > 1 ||
@@ -699,7 +703,7 @@ function advanceInstance(item: Instance, profile: Profile, target: Target,
             s.hip.sub(s.position).applyQuaternion(s.inverse).divideScalar(result.scale)
             const ratio = -s.hip.y * profile.legLengthRatio / item.hemLength
             if (Number.isFinite(ratio) && ratio > 0) {
-              item.stretch = THREE.MathUtils.clamp(ratio, 0.70, 1.35)
+              item.stretch = THREE.MathUtils.clamp(ratio, 0.70, profile.maxLegStretch)
               item.lastLengthFit = pose.timestamp
             }
           }
