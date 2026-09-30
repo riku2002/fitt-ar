@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import type { RefObject } from 'react'
 import { createPoseChannel } from '../pose/poseChannel'
 import { startPoseSession } from '../pose/poseSession'
-import type { PoseState } from '../pose/poseSession'
 import { PoseOverlay } from '../pose/PoseOverlay'
-import { PoseDiagnostics } from '../pose/PoseDiagnostics'
 import { GarmentOverlay } from './GarmentOverlay'
 import type { Garment } from '../wardrobe/garments'
 import { SwipeGesture } from '../gesture/SwipeGesture'
@@ -29,15 +27,7 @@ interface Props {
 }
 
 export function VirtualMirror(props: Props) {
-  const [attempt, setAttempt] = useState(0)
-
-  return (
-    <MirrorSession
-      key={attempt}
-      {...props}
-      retry={() => setAttempt((value) => value + 1)}
-    />
-  )
+  return <MirrorSession {...props} />
 }
 
 function MirrorSession({
@@ -51,10 +41,8 @@ function MirrorSession({
   gestureResetKey,
   onSwipe,
   onToggleFocus,
-  retry,
-}: Props & { retry: () => void }) {
+}: Props) {
   const [source] = useState(createPoseChannel)
-  const [state, setState] = useState<PoseState>('loading')
 
   useEffect(() => {
     if (!videoRef.current) {
@@ -65,7 +53,7 @@ function MirrorSession({
       videoRef.current,
       {
         onFrame: source.publish,
-        onState: setState,
+        onState: () => {},
       },
       async () => {
         const { createPoseLandmarker } = await import('../pose/poseLandmarker')
@@ -86,47 +74,16 @@ function MirrorSession({
 
       {showSkeleton && <PoseOverlay source={source} />}
 
-      <PoseDiagnostics
-        source={source}
-        mirrored={mirrored}
-      />
-
-      <div className={`pose-hud ${mirrored ? 'is-mirrored' : ''}`}>
-        <p
-          role="status"
-          className={`pose-message pose-${state}`}
-        >
-          {state === 'loading'
-            ? '姿勢推定を準備しています…'
-            : state === 'error'
-              ? '姿勢推定を開始できませんでした。再試行してください。'
-              : state === 'searching'
-                ? '肩から腰まで映る位置に立ってください'
-                : state === 'partial'
-                  ? '身体の一部を検出中'
-                  : '身体を追跡中'}
-        </p>
-
-        {showGarment && gestureEnabled && (
-          <SwipeGesture
-            source={source}
-            mirrored={mirrored}
-            resetKey={gestureResetKey}
-            canSwipe={canSwipe}
-            onSwipe={onSwipe}
-            onToggleFocus={onToggleFocus}
-          />
-        )}
-
-        {state === 'error' && (
-          <button
-            className="pose-retry"
-            onClick={retry}
-          >
-            姿勢推定を再試行
-          </button>
-        )}
-      </div>
+      {showGarment && gestureEnabled && (
+        <SwipeGesture
+          source={source}
+          mirrored={mirrored}
+          resetKey={gestureResetKey}
+          canSwipe={canSwipe}
+          onSwipe={onSwipe}
+          onToggleFocus={onToggleFocus}
+        />
+      )}
     </>
   )
 }

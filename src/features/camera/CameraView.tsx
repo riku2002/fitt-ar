@@ -823,17 +823,6 @@ export function CameraView() {
                   <CameraIcon />
                 </div>
 
-                <h2>
-                  {isRequesting
-                    ? 'カメラに接続しています'
-                    : 'ここに、あなたの映像が映ります'}
-                </h2>
-
-                <p>
-                  {isRequesting
-                    ? 'ブラウザに表示されるカメラの許可を確認してください。'
-                    : '準備ができたら「カメラを起動」を押してください。'}
-                </p>
               </div>
             )}
 
@@ -842,11 +831,6 @@ export function CameraView() {
             <div className="frame-corner bottom-left" />
             <div className="frame-corner bottom-right" />
 
-            <span className="stage-note">
-              {isPlaying
-                ? 'LIVE PREVIEW'
-                : 'READY WHEN YOU ARE'}
-            </span>
           </div>
 
           <div className="mirror-bottom">

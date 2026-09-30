@@ -274,6 +274,9 @@ describe('CameraView', () => {
     expect(video.srcObject).toBe(stream)
     expect(video.muted).toBe(true)
     expect(video.parentElement).toHaveClass('is-mirrored')
+    expect(video.closest('.camera-stage')?.querySelector(
+      '.pose-hud, .garment-feedback, .pose-diagnostics, .stage-note',
+    )).toBeNull()
 
     expect(
       screen.getByRole('checkbox', {

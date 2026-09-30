@@ -1,6 +1,5 @@
 import {
-  Component, Suspense, useCallback, useEffect, useLayoutEffect,
-  useMemo, useRef, useState,
+  Component, Suspense, useEffect, useMemo, useRef,
 } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
@@ -42,7 +41,6 @@ const OCCLUSION = {
 type Axis = 'shoulders' | 'hips'
 type Side = 'left' | 'right'
 type TrackingState = 'searching' | 'turning' | 'tracking'
-type ModelState = 'loading' | 'ready' | 'error'
 type ChainId = 'leftArm' | 'rightArm' | 'leftLeg' | 'rightLeg'
 interface Pair {
   left: PosePoint
@@ -769,25 +767,23 @@ function advanceInstance(item: Instance, profile: Profile, target: Target,
   } else item.occluders.hide()
 }
 
-function GarmentModel({ modelUrl, profile, targetsRef, onReady }: {
+function GarmentModel({ modelUrl, profile, targetsRef }: {
   modelUrl: string
   profile: Profile
   targetsRef: RefObject<Targets>
-  onReady: () => void
 }) {
   const { scene } = useGLTF(modelUrl)
   const instance = useMemo(() => createInstance(scene, profile), [scene, profile])
   const instanceRef = useRef(instance)
   useEffect(() => {
     instanceRef.current = instance
-    onReady()
     return () => {
       for (const { material } of instance.materials) material.dispose()
       for (const skeleton of instance.skeletons) skeleton.dispose()
       instance.occluders.dispose()
       // Geometry/textures in the original GLTF remain owned by useGLTF's cache.
     }
-  }, [instance, onReady])
+  }, [instance])
   useFrame(({ camera, size }, delta) => {
     advanceInstance(instanceRef.current, profile, targetsRef.current[profile.axis], camera, size, delta)
   })
@@ -818,25 +814,20 @@ interface Entry {
   requestKey: string
 }
 
-type ModelReport = (slot: GarmentSlot, key: string, state: ModelState) => void
-
 // Runs inside ONE shared Canvas. Only the selected asset remounts on a switch.
-function GarmentEntry({ entry, targetsRef, report }: {
+function GarmentEntry({ entry, targetsRef }: {
   entry: Entry
   targetsRef: RefObject<Targets>
-  report: ModelReport
 }) {
-  const { garment, slot, modelUrl, requestKey } = entry
+  const { garment, modelUrl, requestKey } = entry
   const profile = useMemo(
     () => resolveProfile(garment.category, garment.fit3D, garment.occlusion3D),
     [garment.category, garment.fit3D, garment.occlusion3D],
   )
-  const onReady = useCallback(() => report(slot, requestKey, 'ready'), [slot, requestKey, report])
-  const onError = useCallback(() => report(slot, requestKey, 'error'), [slot, requestKey, report])
   return (
-    <ModelErrorBoundary key={requestKey} onError={onError}>
+    <ModelErrorBoundary key={requestKey} onError={() => {}}>
       <Suspense fallback={null}>
-        <GarmentModel modelUrl={modelUrl} profile={profile} targetsRef={targetsRef} onReady={onReady} />
+        <GarmentModel modelUrl={modelUrl} profile={profile} targetsRef={targetsRef} />
       </Suspense>
     </ModelErrorBoundary>
   )
@@ -851,7 +842,7 @@ type OverlayProps = {
 )
 
 /** Single-garment props remain supported for existing callers/tests. */
-export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayProps) {
+export function GarmentOverlay({ source, garment, garments }: OverlayProps) {
   const worn = useMemo(() => {
     const list = garments ?? (garment ? [garment] : [])
     // onepiece belongs to the tops UI slot, but remains full-body/exclusive.
@@ -867,50 +858,21 @@ export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayP
   const targetsRef = useRef<Targets>({
     shoulders: { pose: null, opacity: 0 }, hips: { pose: null, opacity: 0 },
   })
-  const [tracking, setTracking] = useState<Record<Axis, TrackingState>>({
-    shoulders: 'searching', hips: 'searching',
-  })
-  const [attempts, setAttempts] = useState<Partial<Record<GarmentSlot, number>>>({})
-  const [statuses, setStatuses] = useState<Partial<Record<GarmentSlot, {
-    key: string; state: ModelState
-  }>>>({})
-  const [canvasAttempt, setCanvasAttempt] = useState(0)
-  const [canvasFailed, setCanvasFailed] = useState(false)
-
   const entries = useMemo<Entry[]>(() => worn.map(item => {
     const slot = getGarmentSlot(item.category)
     const modelUrl = item.modelUrl ?? DEFAULT_GARMENT_MODEL_URL
     return {
       garment: item, slot, modelUrl,
       requestKey: JSON.stringify([
-        item.id, modelUrl, item.category, item.fit3D, item.occlusion3D, attempts[slot] ?? 0,
+        item.id, modelUrl, item.category, item.fit3D, item.occlusion3D,
       ]),
     }
-  }), [worn, attempts])
-
-  // Guard callbacks from abandoned/suspended selections.
-  const activeKeysRef = useRef<Partial<Record<GarmentSlot, string>>>({})
-  useLayoutEffect(() => {
-    activeKeysRef.current = Object.fromEntries(entries.map(entry => [entry.slot, entry.requestKey]))
-    return () => { activeKeysRef.current = {} }
-  }, [entries])
-
-  const report = useCallback<ModelReport>((slot, key, state) => {
-    if (activeKeysRef.current[slot] !== key) return
-    setStatuses(previous => previous[slot]?.key === key && previous[slot]?.state === state
-      ? previous : { ...previous, [slot]: { key, state } })
-  }, [])
-  const onCanvasError = useCallback(() => setCanvasFailed(true), [])
+  }), [worn])
 
   useEffect(() => {
     function makeTracker(axis: Axis) {
-      let reported: TrackingState | undefined
-      return createTracker(axis, (target, state) => {
+      return createTracker(axis, (target) => {
         targetsRef.current[axis] = target
-        if (reported !== state) {
-          reported = state
-          setTracking(previous => ({ ...previous, [axis]: state }))
-        }
       })
     }
     const shoulders = makeTracker('shoulders'), hips = makeTracker('hips')
@@ -928,28 +890,16 @@ export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayP
     }
   }, [source])
 
-  function retry(entry: Entry) {
-    useGLTF.clear(entry.modelUrl)
-    setAttempts(previous => ({ ...previous, [entry.slot]: (previous[entry.slot] ?? 0) + 1 }))
-  }
-  function retryCanvas() {
-    setCanvasFailed(false)
-    setStatuses({})
-    setCanvasAttempt(value => value + 1)
-  }
-
   return (
     <>
       <div className="pose-canvas garment-canvas" aria-label="試着する服"
         data-model-url={entries.length === 1 ? entries[0].modelUrl : undefined}
         data-model-urls={JSON.stringify(entries.map(entry => entry.modelUrl))}
         data-fit-axis={entries.length === 1 ? (entries[0].slot === 'bottoms' ? 'hips' : 'shoulders') : 'outfit'}>
-        <ModelErrorBoundary key={canvasAttempt} onError={onCanvasError}>
-          {/* Canvas mounts fallback even when WebGL works. Only the error
-              boundary should report a renderer failure. */}
+        <ModelErrorBoundary onError={() => {}}>
           <Canvas shadows
             camera={{ position: [0, 0, CAMERA_Z], fov: CAMERA_FOV, near: 0.1, far: 100 }}
-            gl={{ alpha: true, antialias: true }} fallback="試着する服の3Dモデル">
+            gl={{ alpha: true, antialias: true }} fallback={null}>
             <ambientLight intensity={1} />
             <directionalLight position={[0, 0, 5]} intensity={1.5} />
             <directionalLight position={[-5, 5, 2]} intensity={0.5} castShadow
@@ -959,44 +909,10 @@ export function GarmentOverlay({ source, garment, garments, mirrored }: OverlayP
               shadow-camera-top={6} shadow-camera-bottom={-6}
               shadow-bias={-0.0003} shadow-normalBias={0.02} />
             {entries.map(entry => (
-              <GarmentEntry key={entry.slot} entry={entry} targetsRef={targetsRef} report={report} />
+              <GarmentEntry key={entry.slot} entry={entry} targetsRef={targetsRef} />
             ))}
           </Canvas>
         </ModelErrorBoundary>
-      </div>
-      <div className={`garment-feedback ${mirrored ? 'is-mirrored' : ''}`}
-        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-        {canvasFailed ? (
-          <button type="button" className="pose-retry" onClick={retryCanvas}>{'3D描画を再起動'}</button>
-        ) : entries.map(entry => {
-          const asset = statuses[entry.slot]
-          const modelState = asset?.key === entry.requestKey ? asset.state : 'loading'
-          const axis = entry.slot === 'bottoms' ? 'hips' : 'shoulders'
-          const state = tracking[axis]
-          const message = modelState === 'error'
-            ? `${entry.garment.name}の3Dモデルを表示できません。GLBを確認してください。`
-            : modelState === 'loading'
-              ? '3Dモデルを読み込んでいます…'
-              : state === 'tracking'
-                ? `${entry.garment.name} · 3D試着中`
-                : state === 'turning'
-                  ? '正面に戻ると試着を再開します'
-                  : axis === 'hips'
-                    ? '両腰を映し、少し静止してください'
-                    : '両肩を映し、少し静止してください'
-          return (
-            <div key={entry.slot} data-outfit-slot={entry.slot} data-model-url={entry.modelUrl} style={{ maxWidth: '100%' }}>
-              <p className="pose-message" role="status"
-                style={{ maxWidth: '100%', boxSizing: 'border-box', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{message}</p>
-              {modelState === 'error' && (
-                <button type="button" className="pose-retry" onClick={() => retry(entry)}
-                  aria-label={entries.length > 1 ? `${entry.garment.name}の3Dモデルを再読み込み` : undefined}>
-                  {'3Dモデルを再読み込み'}
-                </button>
-              )}
-            </div>
-          )
-        })}
       </div>
     </>
   )
