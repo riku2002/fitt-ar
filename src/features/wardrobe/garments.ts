@@ -270,9 +270,9 @@ export const garments: readonly Garment[] = [
     category: 'bottoms',
 
     fit3D: {
-      // Measured waistband width / full GLB width at 97% of model height.
-      // Fit the waist with uniform scaling so the authored leg length remains intact.
-      anchorSpan: 0.56,
+      // Hip joint anchors sit inside the photographed waistband silhouette.
+      // Match the authored GLB markers in config/garment-anchors.json.
+      anchorSpan: 0.42,
       anchorHeight: 0.97,
       legLengthRatio: 1,
 
