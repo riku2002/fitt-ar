@@ -158,29 +158,26 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it('keeps normal model feedback visible when Canvas mounts its fallback content', () => {
+it('keeps the preview free of text when Canvas mounts its fallback content', () => {
   const source = createPoseChannel()
   render(<GarmentOverlay source={source} garment={demoGarment} mirrored />)
 
-  expect(screen.getByRole('status')).toHaveTextContent('両肩を映し、少し静止してください')
+  expect(screen.getByLabelText('試着する服').textContent).toBe('')
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '3D描画を再起動' })).not.toBeInTheDocument()
 })
 
-it('reports a real Canvas failure and recovers through the restart button', () => {
+it('contains a real Canvas failure without covering the preview', () => {
   harness.canvasError = new Error('Intentional WebGL initialization failure')
   const source = createPoseChannel()
   const subscribe = vi.spyOn(source, 'subscribe')
   render(<GarmentOverlay source={source} garment={demoGarment} mirrored />)
 
-  const restart = screen.getByRole('button', { name: '3D描画を再起動' })
-  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
-  harness.canvasError = null
-  fireEvent.click(restart)
-
   expect(screen.queryByRole('button', { name: '3D描画を再起動' })).not.toBeInTheDocument()
-  expect(screen.getByRole('status')).toHaveTextContent('両肩を映し、少し静止してください')
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
   expect(subscribe).toHaveBeenCalledOnce()
-  expect(harness.load).toHaveBeenLastCalledWith(DEFAULT_GARMENT_MODEL_URL)
+  expect(harness.load).not.toHaveBeenCalled()
 })
 
 it('loads the selected URL, disposes the old instance, and preserves Canvas and the pose subscription', () => {
@@ -234,7 +231,7 @@ it('does not resurrect a slow previous selection after a newer GLB has loaded', 
   const source = createPoseChannel()
   const view = render(<GarmentOverlay source={source} garment={a} mirrored />)
   view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
-  expect(screen.getByText('3Dモデルを読み込んでいます…')).toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
   view.rerender(<GarmentOverlay source={source} garment={c} mirrored />)
   const latest = latestAsset()
   await act(async () => { finishB() })
@@ -255,23 +252,21 @@ it('can select another GLB after a load error without recreating Canvas', () => 
   const source = createPoseChannel()
   const view = render(<GarmentOverlay source={source} garment={initial} mirrored />)
   view.rerender(<GarmentOverlay source={source} garment={a} mirrored />)
-  expect(screen.getByRole('button', { name: '3Dモデルを再読み込み' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
   view.rerender(<GarmentOverlay source={source} garment={b} mirrored />)
   expect(latestAsset().name).toBe(b.modelUrl)
   expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
   expect(harness.canvasMount).toHaveBeenCalledOnce()
 })
 
-it('retries only the selected failed URL, not the default or other cached GLBs', () => {
+it('does not cover the preview when the selected GLB fails', () => {
   const selected = garment('broken', '/switch-fixture/broken.glb')
   resources.set(selected.modelUrl!, { kind: 'error', error: new Error('Intentional fixture load failure') })
-  harness.clear.mockImplementation((url: string) => { ready(url) })
   const source = createPoseChannel()
   render(<GarmentOverlay source={source} garment={selected} mirrored />)
-  fireEvent.click(screen.getByRole('button', { name: '3Dモデルを再読み込み' }))
-  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(selected.modelUrl)
-  expect(latestAsset().name).toBe(selected.modelUrl)
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '3Dモデルを再読み込み' })).not.toBeInTheDocument()
+  expect(screen.getByLabelText('試着する服')).toHaveAttribute('data-model-url', selected.modelUrl)
 })
 
 it('keeps legacy 2D fixtures usable without a modelUrl property', () => {

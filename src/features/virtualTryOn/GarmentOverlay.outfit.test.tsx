@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { useFrame } from '@react-three/fiber'
@@ -178,16 +178,15 @@ it('switches only the bottom instance, preserving the top and Canvas', () => {
   expect(harness.unmount).not.toHaveBeenCalled()
 })
 
-it('isolates a bottom load error and retries it without disposing the top', () => {
+it('isolates a bottom load error without covering the top with feedback', () => {
   const top = ready('top'), broken = ready('broken', 'bottoms')
   const source = createPoseChannel()
   const view = render(<GarmentOverlay source={source} garments={[top]} mirrored />)
   const topDispose = vi.spyOn(material('top'), 'dispose')
   cache.set(broken.modelUrl!, new Error('Intentional failure'))
   view.rerender(<GarmentOverlay source={source} garments={[top, broken]} mirrored />)
-  harness.clear.mockImplementation(() => { ready('broken', 'bottoms') })
-  fireEvent.click(screen.getByRole('button', { name: 'brokenの3Dモデルを再読み込み' }))
-  expect(harness.clear).toHaveBeenCalledExactlyOnceWith(broken.modelUrl)
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
   expect(topDispose).not.toHaveBeenCalled()
   expect(harness.mount).toHaveBeenCalledOnce()
 })
@@ -244,5 +243,7 @@ it('halving a fallback anchorSpan doubles displayed width without changing track
 it('rejects invalid calibration instead of rendering NaN or collapsed geometry', () => {
   const garment = { ...ready('invalid'), fit3D: { scaleY: 0 } }
   render(<GarmentOverlay source={createPoseChannel()} garment={garment} mirrored />)
-  expect(screen.getByRole('button', { name: '3Dモデルを再読み込み' })).toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  expect(screen.queryByText('NaN')).not.toBeInTheDocument()
 })
