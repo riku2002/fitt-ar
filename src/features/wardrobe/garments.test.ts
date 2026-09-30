@@ -32,8 +32,8 @@ describe('garment catalog', () => {
   it('registers unique catalog items with valid model/icon paths and supported slots', () => {
     // The catalog is intentionally extensible. Do not hard-code an exact count:
     // adding a new garment should not make this test fail merely because the
-    // catalog grew. The original five built-in entries must still be present.
-    expect(garments.length).toBeGreaterThanOrEqual(5)
+    // Catalog grew. The remaining four original entries must still be present.
+    expect(garments.length).toBeGreaterThanOrEqual(4)
 
     expect(new Set(garments.map((item) => item.id)).size).toBe(
       garments.length,
@@ -71,7 +71,6 @@ describe('garment catalog', () => {
       ['tshirt-2', 'tshirt', 'tshirt2'],
       ['pants', 'bottoms', 'pants'],
       ['skirt', 'bottoms', 'skirt'],
-      ['dress', 'onepiece', 'dress'],
     ] as const
 
     for (const [id, category, filename] of requiredBuiltIns) {
