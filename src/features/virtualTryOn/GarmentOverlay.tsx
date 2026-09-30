@@ -14,6 +14,7 @@ import type {
 import type { PoseFrame, PosePoint, PoseSource } from '../pose/poseTypes'
 
 import { standingAnkleCenter } from './bodyLengthFit'
+import { modelBounds } from './modelBounds'
 
 const EPS = 1e-8
 const CAMERA_Z = 5
@@ -391,7 +392,8 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
   oriented.rotation.set(...profile.rotation)
   oriented.add(asset)
   oriented.updateMatrixWorld(true)
-  const box = new THREE.Box3().setFromObject(oriented, true)
+  const boundsKey = JSON.stringify(profile)
+  const box = modelBounds(scene, oriented, `oriented:${boundsKey}`)
   const size = box.getSize(new THREE.Vector3())
   if (box.isEmpty() || ![size.x, size.y, size.z].every(Number.isFinite) || size.x < EPS || size.y < EPS) {
     throw new Error('GLB has no measurable garment geometry')
@@ -452,7 +454,7 @@ function buildModel(scene: THREE.Object3D, profile: Profile) {
   }
 
   // Safety checks must cover calibrated vertices, not the unadjusted asset.
-  const bounds = new THREE.Box3().setFromObject(visual, true)
+  const bounds = modelBounds(scene, visual, `visual:${boundsKey}`)
   const corners: THREE.Vector3[] = []
   for (const x of [bounds.min.x, bounds.max.x])
     for (const y of [bounds.min.y, bounds.max.y])

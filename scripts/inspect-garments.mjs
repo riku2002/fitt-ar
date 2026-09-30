@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import * as THREE from 'three'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 export function readGlb(file) {
@@ -42,7 +43,7 @@ export async function geometryScene(file) {
   for (const mesh of json.meshes ?? [])
     for (const primitive of mesh.primitives) delete primitive.material
   const bytes = encodeGlb(json, tail)
-  const gltf = await new GLTFLoader().parseAsync(
+  const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     '',
   )
