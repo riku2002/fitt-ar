@@ -12,14 +12,14 @@ export function App() {
           <span className="brand-symbol" aria-hidden="true">
             ↗
           </span>
-          Realtime AR Try-On
+          ARFitt
         </a>
       </header>
       <main className="main-content">
         <CameraView />
       </main>
       <footer className="site-footer">
-        <span>REALTIME AR TRY-ON</span>
+        <span>ARFitt</span>
       </footer>
     </div>
   )
