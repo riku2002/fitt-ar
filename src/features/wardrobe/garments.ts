@@ -313,26 +313,6 @@ export const garments: readonly Garment[] = [
     },
   },
 
-  {
-    ...legacy2D,
-
-    id: 'dress',
-    name: 'ワンピース',
-
-    image: `${base}garments/dress_icon.png`,
-    modelUrl: `${base}garments/dress.glb`,
-
-    gender: 'women',
-    category: 'onepiece',
-
-    fit3D: {
-      anchorSpan: 0.34,
-      anchorHeight: 0.93,
-      torsoAnchorHeight: 0.52,
-      fitTorsoLength: true,
-    },
-  },
-
   /**
    * ------------------------------------------------------------------------
    * Custom garment 1

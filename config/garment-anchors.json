@@ -31,14 +31,6 @@
     "hipHeight": 0.06,
     "hipSpan": 0.48
   },
-  "dress.glb": {
-    "axis": "shoulders",
-    "span": 0.34,
-    "height": 0.93,
-    "depth": 0.5,
-    "hipHeight": 0.52,
-    "hipSpan": 0.272
-  },
   "white_dress.glb": {
     "axis": "shoulders",
     "span": 0.88,
