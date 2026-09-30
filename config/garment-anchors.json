@@ -49,7 +49,7 @@
   },
   "pants.glb": {
     "axis": "hips",
-    "span": 0.56,
+    "span": 0.42,
     "height": 0.97,
     "depth": 0.5
   },
