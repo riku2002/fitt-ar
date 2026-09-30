@@ -238,21 +238,8 @@ export const demoGarment: Garment = {
 /**
  * Catalog order is also the swipe order inside each slot.
  *
- * Because onepiece maps to the "tops" slot, the effective tops swipe order is:
- *
- * Tシャツ / 01
- *   -> Tシャツ / 02
- *   -> ワンピース
- *   -> Autumn Girly Top
- *   -> Black Girly Top
- *   -> White Dress
- *   -> Tシャツ / 01
- *
- * Bottoms remain:
- *
- * ズボン
- *   -> スカート
- *   -> ズボン
+ * Onepiece is included in the tops slot. New men's garments follow the
+ * existing entries; gender filtering preserves the order within each slot.
  */
 export const garments: readonly Garment[] = [
   demoGarment,
@@ -480,5 +467,116 @@ export const garments: readonly Garment[] = [
       layerOffsetZ: 0,
       renderOrder: 20,
     },
+  },
+
+  {
+    ...legacy2D,
+    id: 'autumn-boy-top-01',
+    name: 'メンズ 長袖 / ネイビー',
+    image: `${base}garments/autumn_boy_top_01_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_top_01.glb`,
+    gender: 'men',
+    category: 'shirt',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { fitTorsoLength: true },
+  },
+  {
+    ...legacy2D,
+    id: 'autumn-boy-top-02',
+    name: 'メンズ ジャケット / グレー',
+    image: `${base}garments/autumn_boy_top_02_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_top_02.glb`,
+    gender: 'men',
+    category: 'jacket',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { fitTorsoLength: true },
+  },
+  {
+    ...legacy2D,
+    id: 'autumn-boy-top-03',
+    name: 'メンズ Tシャツ / ホワイト',
+    image: `${base}garments/autumn_boy_top_03_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_top_03.glb`,
+    gender: 'men',
+    category: 'tshirt',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { fitTorsoLength: true },
+  },
+  {
+    ...legacy2D,
+    id: 'autumn-boy-top-04',
+    name: 'メンズ スウェット / グレー',
+    image: `${base}garments/autumn_boy_top_04_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_top_04.glb`,
+    gender: 'men',
+    category: 'shirt',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { fitTorsoLength: true },
+  },
+  {
+    ...legacy2D,
+    id: 'summer-boy-top-01',
+    name: 'メンズ Tシャツ / ブラック',
+    image: `${base}garments/summer_boy_top_01_icon.png`,
+    modelUrl: `${base}garments/summer_boy_top_01.glb`,
+    gender: 'men',
+    category: 'tshirt',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { fitTorsoLength: true },
+  },
+  {
+    ...legacy2D,
+    id: 'autumn-boy-bottom-01',
+    name: 'メンズ デニム / 01',
+    image: `${base}garments/autumn_boy_bottom_01_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_bottom_01.glb`,
+    gender: 'men',
+    category: 'bottoms',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { legLengthRatio: 1, layerOffsetZ: -0.05, renderOrder: 10 },
+  },
+  {
+    ...legacy2D,
+    id: 'autumn-boy-bottom-02',
+    name: 'メンズ デニム / 02',
+    image: `${base}garments/autumn_boy_bottom_02_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_bottom_02.glb`,
+    gender: 'men',
+    category: 'bottoms',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { legLengthRatio: 1, layerOffsetZ: -0.05, renderOrder: 10 },
+  },
+  {
+    ...legacy2D,
+    id: 'autumn-boy-bottom-03',
+    name: 'メンズ パンツ / ブラック',
+    image: `${base}garments/autumn_boy_bottom_03_icon.png`,
+    modelUrl: `${base}garments/autumn_boy_bottom_03.glb`,
+    gender: 'men',
+    category: 'bottoms',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { legLengthRatio: 1, layerOffsetZ: -0.05, renderOrder: 10 },
+  },
+  {
+    ...legacy2D,
+    id: 'summer-boy-bottom-01',
+    name: 'メンズ パンツ / グレー',
+    image: `${base}garments/summer_boy_bottom_01_icon.png`,
+    modelUrl: `${base}garments/summer_boy_bottom_01.glb`,
+    gender: 'men',
+    category: 'bottoms',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { legLengthRatio: 1, layerOffsetZ: -0.05, renderOrder: 10 },
+  },
+  {
+    ...legacy2D,
+    id: 'summer-boy-bottom-02',
+    name: 'メンズ ショートパンツ / ベージュ',
+    image: `${base}garments/summer_boy_bottom_02_icon.png`,
+    modelUrl: `${base}garments/summer_boy_bottom_02.glb`,
+    gender: 'men',
+    category: 'bottoms',
+    // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
+    fit3D: { legLengthRatio: 0.45, layerOffsetZ: -0.05, renderOrder: 10 },
   },
 ]

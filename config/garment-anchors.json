@@ -1,0 +1,134 @@
+{
+  "tshirt1.glb": {
+    "axis": "shoulders",
+    "span": 0.6,
+    "height": 0.84,
+    "depth": 0.5,
+    "hipHeight": 0.12,
+    "hipSpan": 0.48
+  },
+  "tshirt2.glb": {
+    "axis": "shoulders",
+    "span": 0.6,
+    "height": 0.84,
+    "depth": 0.5,
+    "hipHeight": 0.12,
+    "hipSpan": 0.48
+  },
+  "Autumn_girly_top.glb": {
+    "axis": "shoulders",
+    "span": 0.6,
+    "height": 0.84,
+    "depth": 0.5,
+    "hipHeight": 0.12,
+    "hipSpan": 0.48
+  },
+  "black_girly_top.glb": {
+    "axis": "shoulders",
+    "span": 0.6,
+    "height": 0.84,
+    "depth": 0.5,
+    "hipHeight": 0.06,
+    "hipSpan": 0.48
+  },
+  "dress.glb": {
+    "axis": "shoulders",
+    "span": 0.34,
+    "height": 0.93,
+    "depth": 0.5,
+    "hipHeight": 0.52,
+    "hipSpan": 0.272
+  },
+  "white_dress.glb": {
+    "axis": "shoulders",
+    "span": 0.88,
+    "height": 0.93,
+    "depth": 0.5,
+    "hipHeight": 0.42,
+    "hipSpan": 0.704
+  },
+  "pants.glb": {
+    "axis": "hips",
+    "span": 0.56,
+    "height": 0.97,
+    "depth": 0.5
+  },
+  "skirt.glb": {
+    "axis": "hips",
+    "span": 0.365,
+    "height": 0.97,
+    "depth": 0.5
+  },
+  "autumn_boy_top_01.glb": {
+    "axis": "shoulders",
+    "span": 0.48,
+    "height": 0.84,
+    "depth": 0.5,
+    "hipHeight": 0.1,
+    "hipSpan": 0.384
+  },
+  "autumn_boy_top_02.glb": {
+    "axis": "shoulders",
+    "span": 0.44,
+    "height": 0.8,
+    "depth": 0.5,
+    "hipHeight": 0.08,
+    "hipSpan": 0.352,
+    "centerX": 0.54
+  },
+  "autumn_boy_top_03.glb": {
+    "axis": "shoulders",
+    "span": 0.66,
+    "height": 0.88,
+    "depth": 0.5,
+    "hipHeight": 0.14,
+    "hipSpan": 0.528
+  },
+  "autumn_boy_top_04.glb": {
+    "axis": "shoulders",
+    "span": 0.45,
+    "height": 0.84,
+    "depth": 0.5,
+    "hipHeight": 0.08,
+    "hipSpan": 0.36,
+    "centerX": 0.56
+  },
+  "summer_boy_top_01.glb": {
+    "axis": "shoulders",
+    "span": 0.56,
+    "height": 0.86,
+    "depth": 0.5,
+    "hipHeight": 0.1,
+    "hipSpan": 0.448
+  },
+  "autumn_boy_bottom_01.glb": {
+    "axis": "hips",
+    "span": 0.573,
+    "height": 0.97,
+    "depth": 0.5
+  },
+  "autumn_boy_bottom_02.glb": {
+    "axis": "hips",
+    "span": 0.655,
+    "height": 0.97,
+    "depth": 0.5
+  },
+  "autumn_boy_bottom_03.glb": {
+    "axis": "hips",
+    "span": 0.656,
+    "height": 0.97,
+    "depth": 0.5
+  },
+  "summer_boy_bottom_01.glb": {
+    "axis": "hips",
+    "span": 0.642,
+    "height": 0.97,
+    "depth": 0.5
+  },
+  "summer_boy_bottom_02.glb": {
+    "axis": "hips",
+    "span": 0.705,
+    "height": 0.97,
+    "depth": 0.5
+  }
+}
