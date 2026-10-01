@@ -563,6 +563,6 @@ export const garments: readonly Garment[] = [
     gender: 'men',
     category: 'bottoms',
     // Anatomical AR_* anchors are embedded in the GLB; see config/garment-anchors.json.
-    fit3D: { legLengthRatio: 0.45, layerOffsetZ: -0.05, renderOrder: 10 },
+    fit3D: { scaleX:1.30, scale: 1.20, scaleY: 1.15, legLengthRatio: 0.90, layerOffsetZ: -0.08, renderOrder: 10, offsetY: +0.03 },
   },
 ]
