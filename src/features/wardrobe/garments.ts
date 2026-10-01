@@ -395,21 +395,6 @@ export const garments: readonly Garment[] = [
     },
   },
 
-  ...(['smoky-blue', 'mocha-beige'] as const).map((color) => ({
-    ...legacy2D,
-    id: `pearl-blouse-${color}`,
-    name: `パールボタン8分袖ブラウス（${color === 'smoky-blue' ? 'スモーキーブルー' : 'モカベージュ'}）`,
-    image: `${base}garments/pearl_blouse_${color}_icon.png`,
-    modelUrl: `${base}garments/pearl_blouse_${color}.glb`,
-    gender: 'women' as const,
-    category: 'shirt' as const,
-    fit3D: {
-      fitTorsoLength: true,
-      layerOffsetZ: 0,
-      renderOrder: 20,
-    },
-  })),
-
   /**
    * ------------------------------------------------------------------------
    * Custom garment 3
